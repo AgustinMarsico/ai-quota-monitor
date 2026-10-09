@@ -19,7 +19,7 @@ pub fn backoff(failures: u32, interval: u64, maximum: u64, retry: Option<u64>, s
     let jitter = seed % (base / 10 + 1);
     base.saturating_add(jitter)
         .min(maximum)
-        .max(retry.unwrap_or(0).min(86400))
+        .max(retry.unwrap_or(0).min(i64::MAX as u64))
 }
 pub fn update_with<F>(
     config: &Config,
@@ -77,14 +77,13 @@ where
                 } else {
                     c.interval_seconds
                 };
-                p.next_attempt_at = now().max(timestamp)
-                    + backoff(
-                        p.consecutive_failures,
-                        interval,
-                        config.max_backoff_seconds,
-                        error.retry_after_seconds,
-                        timestamp as u64,
-                    ) as i64;
+                p.next_attempt_at = now().max(timestamp).saturating_add(backoff(
+                    p.consecutive_failures,
+                    interval,
+                    config.max_backoff_seconds,
+                    error.retry_after_seconds,
+                    timestamp as u64,
+                ) as i64);
                 p.error = Some(error);
             }
         }

@@ -123,7 +123,14 @@ pub fn response(bytes: &[u8], timestamp: i64) -> Result<Reading, ProviderError> 
         for line in headers.lines() {
             if let Some((key, value)) = line.split_once(':') {
                 if key.eq_ignore_ascii_case("retry-after") {
-                    retry = value.trim().parse::<u64>().ok().map(|s| s.min(86400));
+                    retry = value.trim().parse::<u64>().ok().or_else(|| {
+                        httpdate::parse_http_date(value.trim())
+                            .ok()
+                            .and_then(|date| date.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|duration| {
+                                duration.as_secs().saturating_sub(timestamp.max(0) as u64)
+                            })
+                    });
                 }
             }
         }

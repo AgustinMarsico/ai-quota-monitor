@@ -30,7 +30,7 @@ impl Default for ProviderConfig {
 pub struct Config {
     pub stale_seconds: u64,
     pub max_backoff_seconds: u64,
-    pub retention_days: u32,
+    pub retention_days: Option<u32>,
     pub notifications: bool,
     pub compact_metric: String,
     pub compact_color: String,
@@ -41,7 +41,7 @@ impl Default for Config {
         Self {
             stale_seconds: 600,
             max_backoff_seconds: 3600,
-            retention_days: 90,
+            retention_days: None,
             notifications: true,
             compact_metric: "remaining".into(),
             compact_color: "never".into(),
@@ -92,7 +92,9 @@ impl Config {
     pub fn validate(&self) -> Result<(), String> {
         if !(60..=86400).contains(&self.stale_seconds)
             || !(60..=86400).contains(&self.max_backoff_seconds)
-            || !(1..=3650).contains(&self.retention_days)
+            || self
+                .retention_days
+                .is_some_and(|days| !(1..=3650).contains(&days))
             || !["remaining", "used"].contains(&self.compact_metric.as_str())
             || !["never", "always", "auto"].contains(&self.compact_color.as_str())
         {

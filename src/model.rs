@@ -43,7 +43,6 @@ impl ProviderError {
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Quota {
     pub window: String,
     pub label: String,
@@ -161,6 +160,12 @@ impl Snapshot {
         }
         let mut identities = std::collections::HashSet::new();
         for p in &self.providers {
+            if p.last_success_at.is_some_and(|t| t <= 0)
+                || p.last_attempt_at.is_some_and(|t| t <= 0)
+                || p.next_attempt_at < 0
+            {
+                return Err("Invalid cache timestamp".into());
+            }
             if !identities.insert((&p.provider, &p.profile)) {
                 return Err("Duplicate profile in cache".into());
             }

@@ -15,7 +15,14 @@ pub fn private_dir(path: &Path) -> Result<(), String> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
         .map_err(|_| "Cannot set directory permissions".into())
 }
-pub fn writer_lock(loc: &Locations) -> Result<File, String> {
+pub struct WriterLock(File);
+impl Drop for WriterLock {
+    fn drop(&mut self) {
+        // Explicit unlock also releases a briefly fork-inherited open description.
+        let _ = self.0.unlock();
+    }
+}
+pub fn writer_lock(loc: &Locations) -> Result<WriterLock, String> {
     private_dir(&loc.state)?;
     let file = OpenOptions::new()
         .read(true)
@@ -27,7 +34,7 @@ pub fn writer_lock(loc: &Locations) -> Result<File, String> {
         .map_err(|_| "Cannot open writer lock")?;
     file.try_lock()
         .map_err(|_| "Another update is in progress; retry shortly".to_string())?;
-    Ok(file)
+    Ok(WriterLock(file))
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path.parent().ok_or("Missing cache parent")?;
@@ -173,7 +180,20 @@ pub fn save(
                 ));
             }
             // With unknown reset, re-arm only after observed recovery above the threshold.
-            tx.execute("INSERT INTO alerts(provider,profile,window,reset_at,level) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(provider,profile,window) DO UPDATE SET reset_at=excluded.reset_at,level=excluded.level",params![p.provider,p.profile,q.window,q.resets_at,level]).map_err(|_| "Cannot save alert state")?;
+            let saved_level = if !new_period && q.resets_at.is_some() {
+                old.min(level)
+            } else {
+                level
+            };
+            let reset_id = if !new_period {
+                previous
+                    .as_ref()
+                    .and_then(|(reset, _)| *reset)
+                    .or(q.resets_at)
+            } else {
+                q.resets_at
+            };
+            tx.execute("INSERT INTO alerts(provider,profile,window,reset_at,level) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(provider,profile,window) DO UPDATE SET reset_at=excluded.reset_at,level=excluded.level",params![p.provider,p.profile,q.window,reset_id,saved_level]).map_err(|_| "Cannot save alert state")?;
         }
     }
     let bytes = serde_json::to_vec(snapshot).map_err(|_| "Cannot serialize state")?;
@@ -182,11 +202,13 @@ pub fn save(
         [std::str::from_utf8(&bytes).map_err(|_| "Invalid serialization")?],
     )
     .map_err(|_| "Cannot save state")?;
-    tx.execute(
-        "DELETE FROM samples WHERE sampled_at < ?1",
-        [snapshot.generated_at - i64::from(config.retention_days) * 86400],
-    )
-    .map_err(|_| "Cannot apply retention")?;
+    if let Some(days) = config.retention_days {
+        tx.execute(
+            "DELETE FROM samples WHERE sampled_at < ?1",
+            [snapshot.generated_at - i64::from(days) * 86400],
+        )
+        .map_err(|_| "Cannot apply retention")?;
+    }
     tx.commit().map_err(|_| "Cannot commit state")?;
     atomic_write(&loc.cache, &bytes)?;
     Ok(notifications)
