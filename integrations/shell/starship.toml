@@ -1,0 +1,7 @@
+# Merge manually into starship.toml; no network on prompt rendering.
+[custom.ai_quota]
+command = "ai-quota status --compact --color never"
+when = "command -v ai-quota >/dev/null 2>&1"
+shell = ["bash", "--noprofile", "--norc"]
+format = "[$output]($style) "
+style = "bold cyan"

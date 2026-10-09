@@ -1,0 +1,12 @@
+{
+  "stale_seconds": 600,
+  "max_backoff_seconds": 3600,
+  "retention_days": null,
+  "notifications": true,
+  "compact_metric": "remaining",
+  "compact_color": "never",
+  "providers": [
+    {"provider": "codex", "profile": "default", "enabled": true, "interval_seconds": 180, "codex_bin": "codex", "codex_home": null},
+    {"provider": "opencode-go", "profile": "default", "enabled": true, "interval_seconds": 180, "auth_file": null}
+  ]
+}

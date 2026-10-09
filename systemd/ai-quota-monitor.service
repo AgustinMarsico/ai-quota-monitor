@@ -1,0 +1,17 @@
+[Unit]
+Description=Unified AI quota monitor
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/ai-quota daemon
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=20
+TimeoutStopSec=60
+UMask=0077
+NoNewPrivileges=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
