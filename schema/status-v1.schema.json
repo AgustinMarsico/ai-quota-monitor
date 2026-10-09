@@ -4,46 +4,93 @@
   "type": "object",
   "required": ["schema_version", "generated_at", "stale_seconds", "providers"],
   "properties": {
-    "schema_version": {"const": 1},
-    "generated_at": {"type": "integer"},
-    "stale_seconds": {"type": "integer", "minimum": 1},
-    "providers": {"type": "array", "items": {"$ref": "#/definitions/provider"}}
+    "schema_version": { "const": 1 },
+    "generated_at": { "type": "integer", "minimum": 1 },
+    "stale_seconds": { "type": "integer", "minimum": 1 },
+    "providers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/provider" }
+    }
   },
   "definitions": {
-    "nullableString": {"type": ["string", "null"]},
-    "nullableTimestamp": {"type": ["integer", "null"], "minimum": 1},
+    "nullableString": { "type": ["string", "null"] },
+    "nullableTimestamp": { "type": ["integer", "null"], "minimum": 1 },
     "quota": {
       "type": "object",
-      "required": ["window", "label", "duration_minutes", "used_percent", "remaining_percent", "resets_at"],
+      "required": [
+        "window",
+        "label",
+        "duration_minutes",
+        "used_percent",
+        "remaining_percent",
+        "resets_at"
+      ],
       "properties": {
-        "window": {"type": "string"}, "label": {"type": "string"},
-        "duration_minutes": {"type": ["integer", "null"], "minimum": 1},
-        "used_percent": {"type": "number", "minimum": 0, "maximum": 100},
-        "remaining_percent": {"type": "number", "minimum": 0, "maximum": 100},
-        "resets_at": {"$ref": "#/definitions/nullableTimestamp"}
+        "window": { "type": "string" },
+        "label": { "type": "string" },
+        "duration_minutes": { "type": ["integer", "null"], "minimum": 1 },
+        "used_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "remaining_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "resets_at": { "$ref": "#/definitions/nullableTimestamp" }
       }
     },
     "error": {
       "type": "object",
       "required": ["kind", "message", "retry_after_seconds"],
       "properties": {
-        "kind": {"enum": ["authentication", "credentials_missing", "rate_limited", "network", "invalid_response", "unavailable", "internal"]},
-        "message": {"type": "string"},
-        "retry_after_seconds": {"type": ["integer", "null"], "minimum": 0}
+        "kind": {
+          "enum": [
+            "authentication",
+            "credentials_missing",
+            "rate_limited",
+            "network",
+            "invalid_response",
+            "unavailable",
+            "internal"
+          ]
+        },
+        "message": { "type": "string" },
+        "retry_after_seconds": { "type": ["integer", "null"], "minimum": 0 }
       }
     },
     "provider": {
       "type": "object",
-      "required": ["provider", "profile", "account", "model", "plan", "source", "limitations", "quotas", "last_success_at", "last_attempt_at", "state", "error", "consecutive_failures", "next_attempt_at"],
+      "required": [
+        "provider",
+        "profile",
+        "account",
+        "model",
+        "plan",
+        "source",
+        "limitations",
+        "quotas",
+        "last_success_at",
+        "last_attempt_at",
+        "state",
+        "error",
+        "consecutive_failures",
+        "next_attempt_at"
+      ],
       "properties": {
-        "provider": {"type": "string"}, "profile": {"type": "string"},
-        "account": {"$ref": "#/definitions/nullableString"}, "model": {"$ref": "#/definitions/nullableString"}, "plan": {"$ref": "#/definitions/nullableString"},
-        "source": {"type": "string"}, "limitations": {"type": "array", "items": {"type": "string"}},
-        "quotas": {"type": "array", "items": {"$ref": "#/definitions/quota"}},
-        "last_success_at": {"$ref": "#/definitions/nullableTimestamp"}, "last_attempt_at": {"$ref": "#/definitions/nullableTimestamp"},
-        "state": {"enum": ["fresh", "stale", "unavailable", "error"]},
-        "error": {"anyOf": [{"type": "null"}, {"$ref": "#/definitions/error"}]},
-        "consecutive_failures": {"type": "integer", "minimum": 0}, "next_attempt_at": {"type": "integer", "minimum": 0}
+        "provider": { "type": "string" },
+        "profile": { "type": "string" },
+        "account": { "$ref": "#/definitions/nullableString" },
+        "model": { "$ref": "#/definitions/nullableString" },
+        "plan": { "$ref": "#/definitions/nullableString" },
+        "source": { "type": "string" },
+        "limitations": { "type": "array", "items": { "type": "string" } },
+        "quotas": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/quota" }
+        },
+        "last_success_at": { "$ref": "#/definitions/nullableTimestamp" },
+        "last_attempt_at": { "$ref": "#/definitions/nullableTimestamp" },
+        "state": { "enum": ["fresh", "stale", "unavailable", "error"] },
+        "error": {
+          "anyOf": [{ "type": "null" }, { "$ref": "#/definitions/error" }]
+        },
+        "consecutive_failures": { "type": "integer", "minimum": 0 },
+        "next_attempt_at": { "type": "integer", "minimum": 0 }
       }
     }
   }

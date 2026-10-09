@@ -30,6 +30,35 @@ test("Rust CLI JSON matches independently published schema", () => {
       ),
     );
     assert.equal(validate(json), true, JSON.stringify(validate.errors));
+    fs.writeFileSync(
+      `${temp}/config.json`,
+      JSON.stringify({
+        notifications: false,
+        providers: [
+          {
+            provider: "codex",
+            codex_bin: new URL("tests/fixtures/mock-codex.py", root).pathname,
+          },
+        ],
+      }),
+    );
+    const populated = JSON.parse(
+      execFileSync(
+        new URL("target/debug/ai-quota", root).pathname,
+        [
+          "refresh",
+          "--json",
+          "--config",
+          `${temp}/config.json`,
+          "--cache",
+          `${temp}/status.json`,
+          "--state-dir",
+          `${temp}/state`,
+        ],
+        { encoding: "utf8" },
+      ),
+    );
+    assert.equal(validate(populated), true, JSON.stringify(validate.errors));
     const invalid = structuredClone(json);
     delete invalid.providers[0].last_success_at;
     assert.equal(validate(invalid), false);

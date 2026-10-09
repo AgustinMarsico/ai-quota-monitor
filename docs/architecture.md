@@ -45,6 +45,7 @@ La ventana mensual no se expresa como una cantidad inventada de minutos.
 Estados:
 - `fresh`: muestra válida dentro de TTL y sin ventana vencida ni último error.
 - `stale`: conserva cuotas, pero hubo error, vencimiento, antigüedad o reloj futuro.
+  También incluye muestras importadas sin un intento registrado en el monitor nuevo.
 - `unavailable`: todavía no hay muestra ni error.
 - `error`: intento fallido sin cuotas disponibles.
 
@@ -75,6 +76,8 @@ de al menos diez minutos. `Retry-After`, numérico o fecha HTTP, tiene prioridad
 sobre el máximo normal de backoff. No se hacen reintentos internos ocultos.
 
 Alertas 20/10/5: un aviso por salto al nivel más urgente, con estado durable.
+Los avisos del umbral 5 son críticos; los de 10/20 son normales. La entrega es
+best-effort, acotada a dos segundos por proceso para no bloquear el monitor.
 Reinicios Go estimados admiten una tolerancia de cinco minutos. En ventanas con
 reinicio conocido no se repite un umbral del mismo período. Sin reinicio conocido,
 se rearman únicamente tras observar recuperación, nunca por un día artificial.

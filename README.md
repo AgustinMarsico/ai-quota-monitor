@@ -14,7 +14,7 @@ restauró la cuota. Fechas ausentes son `null`, no cero.
 
 ## Compilar y probar sin afectar la sesión
 
-Requisitos del núcleo: Rust >= 1.89, Cargo, Python 3 para scripts/pruebas.
+Requisitos del núcleo: Rust >= 1.89, Cargo, compilador C/enlazador (GCC), Python 3 para scripts/pruebas.
 En ejecución real: Codex CLI autenticado con ChatGPT, `curl` para Go;
 `notify-send` es opcional para alertas de escritorio.
 
@@ -40,6 +40,7 @@ ai-quota status --provider codex
 ai-quota status --provider opencode-go
 ai-quota status --compact --metric used
 ai-quota refresh
+ai-quota check --provider codex
 ai-quota doctor --json
 ai-quota history --days 7
 ai-quota export --days 30 > cuotas.csv
@@ -50,6 +51,11 @@ ai-quota daemon
 recalcula obsolescencia según su edad. `refresh` es una consulta explícita; respeta
 el backoff incluso cuando se solicita manualmente. El daemon y `refresh` comparten
 bloqueo y estado de planificación. Un segundo daemon falla de forma explícita.
+
+`check` recupera el diagnóstico remoto de los monitores originales: no escribe
+caché, historial ni estado, y no envía notificaciones. Usa el bloqueo existente
+cuando hay un monitor y respeta el backoff guardado. Los errores nuevos de `check`
+no se persisten; `refresh` es el comando que registra intentos y planificación.
 
 Opciones comunes: `--config PATH`, `--state-dir PATH`, `--cache PATH`,
 `--provider ID`, `--color never|auto|always`, `--metric remaining|used`.
@@ -104,6 +110,14 @@ npm --prefix integrations/opencode run typecheck
 npm --prefix integrations/opencode run lint
 npm --prefix integrations/opencode test
 node tests/gnome.mjs
+```
+
+Para ejecutar todo con `scripts/check.sh`, preparar además los verificadores Python:
+
+```bash
+python3 -m venv target/test-env
+target/test-env/bin/pip install -r tests/requirements.txt
+scripts/check.sh
 ```
 
 Licencia MIT. Atribuciones de lógica reutilizada en [`NOTICE`](NOTICE).

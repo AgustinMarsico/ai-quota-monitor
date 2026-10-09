@@ -4,3 +4,5 @@
 /sandbox/
 *.sqlite3*
 *.tmp
+.ruff_cache/
+__pycache__/

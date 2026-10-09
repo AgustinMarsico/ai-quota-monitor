@@ -60,6 +60,7 @@ systemctl --user enable --now codex-quota-monitor.service opencode-go-quota-moni
 Dos fuentes reales, ventanas 5h/7d/mensual, datos obsoletos, historial persistente,
 CSV, alertas 20/10/5, GNOME con detalle y enlaces, servicio de usuario y consulta
 de diagnóstico. Las fechas de consola se expresan en Unix UTC; las interfaces
-visuales presentan fechas locales. El modo antiguo `--check` se sustituye por
-`refresh` aislado mediante `--state-dir` y `--cache`: conserva evidencia del intento
-en el destino elegido y no emite alertas si `notifications` está desactivado.
+visuales presentan fechas locales y cuenta regresiva. El modo antiguo `--check`
+se conserva como `ai-quota check`, sin persistencia ni alertas. Para guardar evidencia
+del intento, usar `refresh` aislado mediante `--state-dir` y `--cache`, con
+`notifications: false` si se desea evitar avisos.

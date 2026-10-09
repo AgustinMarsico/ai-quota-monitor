@@ -6,7 +6,20 @@
   "compact_metric": "remaining",
   "compact_color": "never",
   "providers": [
-    {"provider": "codex", "profile": "default", "enabled": true, "interval_seconds": 180, "codex_bin": "codex", "codex_home": null},
-    {"provider": "opencode-go", "profile": "default", "enabled": true, "interval_seconds": 180, "auth_file": null}
+    {
+      "provider": "codex",
+      "profile": "default",
+      "enabled": true,
+      "interval_seconds": 180,
+      "codex_bin": "codex",
+      "codex_home": null
+    },
+    {
+      "provider": "opencode-go",
+      "profile": "default",
+      "enabled": true,
+      "interval_seconds": 180,
+      "auth_file": null
+    }
   ]
 }
