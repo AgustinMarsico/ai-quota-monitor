@@ -1,0 +1,10 @@
+{
+  "name": "ai-quota-opencode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {"typecheck": "tsc --noEmit", "test": "node --test tests/*.test.mjs", "format": "prettier --write *.ts *.tsx ../shared/*.mjs tests/*.mjs", "lint": "prettier --check *.ts *.tsx ../shared/*.mjs tests/*.mjs"},
+  "dependencies": {"solid-js": "1.9.12"},
+  "devDependencies": {"@opencode-ai/plugin": "1.18.35", "@opentui/core": "0.4.5", "@opentui/solid": "0.4.5", "@opentui/keymap": "0.4.5", "@types/node": "24.12.2", "typescript": "5.8.2", "prettier": "3.5.3", "ajv": "8.20.0"},
+  "overrides": {"seroval": "1.6.9", "@babel/core": "^7.29.1"}
+}
