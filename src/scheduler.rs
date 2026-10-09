@@ -21,6 +21,53 @@ pub fn backoff(failures: u32, interval: u64, maximum: u64, retry: Option<u64>, s
         .min(maximum)
         .max(retry.unwrap_or(0).min(i64::MAX as u64))
 }
+fn apply_result(
+    p: &mut crate::model::ProviderStatus,
+    c: &crate::config::ProviderConfig,
+    config: &Config,
+    timestamp: i64,
+    result: Result<Reading, ProviderError>,
+) -> bool {
+    p.last_attempt_at = Some(timestamp);
+    let finished = now().max(timestamp);
+    let success = match result {
+        Ok(reading) => {
+            p.quotas = reading.quotas;
+            p.account = reading.account;
+            p.model = reading.model;
+            p.plan = reading.plan;
+            p.source = reading.source;
+            p.limitations = reading.limitations;
+            p.last_success_at = Some(finished);
+            p.error = None;
+            p.consecutive_failures = 0;
+            p.next_attempt_at = finished.saturating_add(c.interval_seconds as i64);
+            true
+        }
+        Err(error) => {
+            p.consecutive_failures = p.consecutive_failures.saturating_add(1);
+            let interval = if matches!(
+                error.kind,
+                ErrorKind::Authentication | ErrorKind::CredentialsMissing
+            ) {
+                c.interval_seconds.max(600)
+            } else {
+                c.interval_seconds
+            };
+            p.next_attempt_at = finished.saturating_add(backoff(
+                p.consecutive_failures,
+                interval,
+                config.max_backoff_seconds,
+                error.retry_after_seconds,
+                timestamp as u64,
+            ) as i64);
+            p.error = Some(error);
+            false
+        }
+    };
+    p.age_state(finished, config.stale_seconds);
+    success
+}
 pub fn update_with<F>(
     config: &Config,
     loc: &Locations,
@@ -43,6 +90,9 @@ where
         .iter()
         .filter(|c| c.enabled && provider.is_none_or(|id| c.provider == id))
     {
+        if STOP.load(Ordering::Relaxed) {
+            break;
+        }
         let p = snapshot
             .providers
             .iter_mut()
@@ -52,44 +102,12 @@ where
         if p.next_attempt_at > timestamp && (!manual || p.error.is_some()) {
             continue;
         }
-        p.last_attempt_at = Some(timestamp);
         attempted = true;
-        match fetch(c, timestamp) {
-            Ok(reading) => {
-                p.quotas = reading.quotas;
-                p.account = reading.account;
-                p.model = reading.model;
-                p.plan = reading.plan;
-                p.source = reading.source;
-                p.limitations = reading.limitations;
-                p.last_success_at = Some(now().max(timestamp));
-                p.error = None;
-                p.consecutive_failures = 0;
-                p.next_attempt_at = now().max(timestamp) + c.interval_seconds as i64;
-                successes.push((p.provider.clone(), p.profile.clone()));
-            }
-            Err(error) => {
-                failed = true;
-                p.consecutive_failures = p.consecutive_failures.saturating_add(1);
-                let interval = if matches!(
-                    error.kind,
-                    ErrorKind::Authentication | ErrorKind::CredentialsMissing
-                ) {
-                    c.interval_seconds.max(600)
-                } else {
-                    c.interval_seconds
-                };
-                p.next_attempt_at = now().max(timestamp).saturating_add(backoff(
-                    p.consecutive_failures,
-                    interval,
-                    config.max_backoff_seconds,
-                    error.retry_after_seconds,
-                    timestamp as u64,
-                ) as i64);
-                p.error = Some(error);
-            }
+        if apply_result(p, c, config, timestamp, fetch(c, timestamp)) {
+            successes.push((p.provider.clone(), p.profile.clone()));
+        } else {
+            failed = true;
         }
-        p.age_state(now().max(timestamp), config.stale_seconds);
     }
     if !attempted {
         if storage::read_cache(&loc.cache)
@@ -106,11 +124,7 @@ where
     let alerts = storage::save(&mut db, loc, &snapshot, &successes, config)?;
     if config.notifications {
         for alert in alerts {
-            let _ = std::process::Command::new("notify-send")
-                .args(["-a", "AI Quota Monitor", "AI quota", &alert])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
+            notify(&alert);
         }
     }
     Ok((snapshot, failed))
@@ -122,6 +136,93 @@ pub fn refresh(
     manual: bool,
 ) -> Result<(Snapshot, bool), String> {
     update_with(config, loc, provider, manual, now(), providers::fetch)
+}
+fn notify(alert: &storage::Alert) {
+    use std::os::unix::process::CommandExt;
+    let child = std::process::Command::new("notify-send")
+        .process_group(0)
+        .args([
+            "-a",
+            "AI Quota Monitor",
+            "-u",
+            if alert.threshold <= 5 {
+                "critical"
+            } else {
+                "normal"
+            },
+            "AI quota",
+            &alert.message,
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        eprintln!("notification unavailable; check notify-send");
+        return;
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    eprintln!("notification delivery failed");
+                }
+                return;
+            }
+            _ if std::time::Instant::now() >= deadline => {
+                // SAFETY: this notifier and its descendants own this new group.
+                unsafe {
+                    libc::kill(-(child.id() as i32), libc::SIGKILL);
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                eprintln!("notification delivery timed out");
+                return;
+            }
+            _ => std::thread::sleep(Duration::from_millis(25)),
+        }
+    }
+}
+pub fn check(
+    config: &Config,
+    loc: &Locations,
+    provider: Option<&str>,
+) -> Result<(Snapshot, bool), String> {
+    let _lock = storage::existing_writer_lock(loc)?;
+    let previous = if loc.cache.exists() {
+        Some(storage::read_cache(&loc.cache)?)
+    } else {
+        None
+    };
+    let mut snapshot = storage::empty(config);
+    let mut failed = false;
+    for c in config
+        .providers
+        .iter()
+        .filter(|c| c.enabled && provider.is_none_or(|id| c.provider == id))
+    {
+        let p = snapshot
+            .providers
+            .iter_mut()
+            .find(|p| p.provider == c.provider && p.profile == c.profile)
+            .ok_or("Missing profile")?;
+        if let Some(old) = previous.as_ref().and_then(|s| {
+            s.providers
+                .iter()
+                .find(|p| p.provider == c.provider && p.profile == c.profile)
+        }) {
+            *p = old.clone();
+        }
+        if p.error.is_some() && p.next_attempt_at > now() {
+            failed = true;
+            continue;
+        }
+        let timestamp = now();
+        failed |= !apply_result(p, c, config, timestamp, providers::fetch(c, timestamp));
+    }
+    snapshot.generated_at = now();
+    Ok((snapshot, failed))
 }
 pub fn daemon(config: &Config, loc: &Locations) -> Result<(), String> {
     storage::private_dir(&loc.state)?;

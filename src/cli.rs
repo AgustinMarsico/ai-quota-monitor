@@ -43,7 +43,7 @@ pub fn render(snapshot: &Snapshot, compact: bool, metric: &str, color: bool) -> 
             } else {
                 q.remaining_percent
             };
-            let value = format!("{percent:.0}%");
+            let value = format!("{:.0}%", percent.round());
             let value = if color {
                 format!(
                     "\x1b[{}m{value}\x1b[0m",
@@ -67,7 +67,7 @@ pub fn render(snapshot: &Snapshot, compact: bool, metric: &str, color: bool) -> 
     }
     lines.join(if compact { " | " } else { "\n" })
 }
-const HELP:&str="AI Quota Monitor\n\nCommands:\n  status [--json|--compact] [--provider codex|opencode-go]\n  refresh [--provider PROVIDER]\n  daemon\n  doctor [--json]\n  history [--days N] [--provider PROVIDER]\n  export [--days N] [--provider PROVIDER]\n  migrate --from DIRECTORY --provider PROVIDER\n\nOptions: --config PATH, --state-dir PATH, --cache PATH, --color auto|always|never, --metric remaining|used\nstatus never performs network requests. '~' means stale; '?' means unavailable.\n";
+const HELP:&str="AI Quota Monitor\n\nCommands:\n  status [--json|--compact] [--provider codex|opencode-go]\n  refresh [--provider PROVIDER]\n  check [--provider PROVIDER]  Query without persistence or notifications\n  daemon\n  doctor [--json]\n  history [--days N] [--provider PROVIDER]\n  export [--days N] [--provider PROVIDER]\n  migrate --from DIRECTORY --provider PROVIDER\n\nOptions: --config PATH, --state-dir PATH, --cache PATH, --color auto|always|never, --metric remaining|used\nstatus never performs network requests. '~' means stale; '?' means unavailable.\n";
 pub fn run(args: Vec<String>) -> Result<i32, String> {
     let mut loc = Locations::default();
     let mut command = "status".to_string();
@@ -168,6 +168,11 @@ pub fn run(args: Vec<String>) -> Result<i32, String> {
                 .any(|p| provider.as_ref().is_none_or(|id| p.provider == *id) && p.error.is_some());
             output(snapshot)?;
             Ok(if failed || pending_error { 1 } else { 0 })
+        }
+        "check" => {
+            let (snapshot, failed) = scheduler::check(&config, &loc, provider.as_deref())?;
+            output(snapshot)?;
+            Ok(if failed { 1 } else { 0 })
         }
         "daemon" => {
             scheduler::daemon(&config, &loc)?;

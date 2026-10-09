@@ -41,7 +41,14 @@ for line in sys.stdin:
                     "id": request["id"],
                     "result": {
                         "rateLimits": {
-                            "primary": {"usedPercent": 22, "windowDurationMins": 300}
+                            "primary": {
+                                "usedPercent": 96 if mode == "low" else 22,
+                                "windowDurationMins": 300,
+                            },
+                            "secondary": {
+                                "usedPercent": 38,
+                                "windowDurationMins": 10080,
+                            },
                         }
                     },
                 }

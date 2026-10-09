@@ -163,7 +163,7 @@ pub fn response(bytes: &[u8], timestamp: i64) -> Result<Reading, ProviderError> 
     }
 }
 impl Provider for Go {
-    fn fetch(&self, config: &ProviderConfig, timestamp: i64) -> Result<Reading, ProviderError> {
+    fn fetch(&self, config: &ProviderConfig, _: i64) -> Result<Reading, ProviderError> {
         let key = credentials(config)?;
         let mut child = Command::new("curl")
             .args([
@@ -213,7 +213,8 @@ impl Provider for Go {
                 "OpenCode Go connection failed or timed out",
             ));
         }
-        response(&output.stdout, timestamp)
+        // Relative resets are measured from response receipt, not request start.
+        response(&output.stdout, crate::model::now())
     }
 }
 

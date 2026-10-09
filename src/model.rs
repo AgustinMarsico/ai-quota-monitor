@@ -132,6 +132,7 @@ impl ProviderStatus {
                 DataState::Unavailable
             }
         } else if self.error.is_some()
+            || self.last_attempt_at.is_none()
             || self
                 .last_success_at
                 .is_none_or(|t| timestamp - t > stale_seconds as i64 || t > timestamp + 60)

@@ -144,6 +144,7 @@ fn stale_and_expired_window() {
     let mut p = ai_quota_monitor::model::ProviderStatus::empty("codex", "default");
     p.quotas = reading(40.0, Some(2000)).quotas;
     p.last_success_at = Some(1000);
+    p.last_attempt_at = Some(1000);
     p.age_state(1100, 600);
     assert_eq!(p.state, DataState::Fresh);
     p.age_state(1700, 600);
@@ -328,6 +329,9 @@ fn csv_and_cli_json() {
     );
     assert!(text.contains("78%"));
     assert!(!text.contains('\x1b'));
+    let mut snapshot = storage::read_cache(&loc.cache).unwrap();
+    snapshot.providers[0].quotas = reading(62.5, None).quotas;
+    assert!(ai_quota_monitor::cli::render(&snapshot, true, "remaining", false).contains("63%"));
 }
 #[test]
 fn private_permissions() {

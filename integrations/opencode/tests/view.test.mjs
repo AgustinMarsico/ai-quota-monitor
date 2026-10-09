@@ -13,6 +13,7 @@ const fixture = () => ({
       state: "fresh",
       error: null,
       last_success_at: 1000,
+      last_attempt_at: 1000,
       quotas: [
         {
           window: "primary",
@@ -30,11 +31,20 @@ test("remaining, not used, and absent reset", () => {
   const s = validate(fixture());
   assert.equal(compact(s, 1000), "Codex 5h: 78%");
   assert.match(details(s), /not reported/);
+  s.providers[0].quotas[0].used_percent = 37.5;
+  s.providers[0].quotas[0].remaining_percent = 62.5;
+  assert.match(compact(s, 1000), /63%/);
+  s.providers[0].quotas[0].resets_at = Math.floor(Date.now() / 1000) + 3600;
+  assert.match(details(s), /in 0d 1h/);
 });
 test("offline age and expired windows never restore quota", () => {
   const s = fixture();
   assert.match(compact(s, 1700), /78% ~/);
   s.providers[0].quotas[0].resets_at = 1000;
+  assert.match(compact(s, 1001), /78% ~/);
+  assert.match(details(s), /reported reset passed/);
+  s.providers[0].quotas[0].resets_at = null;
+  s.providers[0].last_attempt_at = null;
   assert.match(compact(s, 1001), /78% ~/);
 });
 test("contract rejects zero substitution and future versions", () => {
@@ -62,4 +72,6 @@ test("multi-provider, monthly and unavailable", () => {
   assert.match(compact(s, 1000), /Go month: 78%/);
   s.providers[1].quotas = [];
   assert.match(compact(s, 1000), /Go: \?/);
+  s.providers[1].error = { message: "Use connect" };
+  assert.match(details(s), /Use connect/);
 });

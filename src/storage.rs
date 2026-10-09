@@ -22,6 +22,20 @@ impl Drop for WriterLock {
         let _ = self.0.unlock();
     }
 }
+pub fn existing_writer_lock(loc: &Locations) -> Result<Option<WriterLock>, String> {
+    let file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(loc.state.join("writer.lock"))
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("Cannot inspect existing writer lock".into()),
+    };
+    file.try_lock()
+        .map_err(|_| "Another update is in progress; retry shortly".to_string())?;
+    Ok(Some(WriterLock(file)))
+}
 pub fn writer_lock(loc: &Locations) -> Result<WriterLock, String> {
     private_dir(&loc.state)?;
     let file = OpenOptions::new()
@@ -138,13 +152,17 @@ pub fn durable(db: &Connection, config: &Config) -> Result<Snapshot, String> {
     }
     Ok(snapshot)
 }
+pub struct Alert {
+    pub message: String,
+    pub threshold: u8,
+}
 pub fn save(
     db: &mut Connection,
     loc: &Locations,
     snapshot: &Snapshot,
     successful: &[(String, String)],
     config: &Config,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<Alert>, String> {
     snapshot.validate()?;
     let tx = db.transaction().map_err(|_| "Cannot begin transaction")?;
     let mut notifications = vec![];
@@ -174,10 +192,13 @@ pub fn save(
                     });
             let old = previous.as_ref().map(|(_, level)| *level).unwrap_or(100);
             if level < 100 && (new_period || level < old) {
-                notifications.push(format!(
-                    "{} [{}] {}: {:.1}% remaining",
-                    p.provider, p.profile, q.label, q.remaining_percent
-                ));
+                notifications.push(Alert {
+                    threshold: level,
+                    message: format!(
+                        "{} [{}] {}: {:.1}% remaining",
+                        p.provider, p.profile, q.label, q.remaining_percent
+                    ),
+                });
             }
             // With unknown reset, re-arm only after observed recovery above the threshold.
             let saved_level = if !new_period && q.resets_at.is_some() {
