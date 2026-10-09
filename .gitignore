@@ -1,0 +1,6 @@
+/target/
+/node_modules/
+/integrations/opencode/node_modules/
+/sandbox/
+*.sqlite3*
+*.tmp
