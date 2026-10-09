@@ -58,7 +58,7 @@ pub fn parse(value: &Value, timestamp: i64) -> Result<Reading, ProviderError> {
             "OpenCode Go returned no quota windows",
         ));
     }
-    Ok(Reading { quotas, plan: None, source: "https://opencode.ai/zen/go/v1/usage".into(), limitations: vec!["Undocumented endpoint; aggregate windows only, no per-model quotas inferred; reset may be absent".into()] })
+    Ok(Reading { quotas, account: None, model: None, plan: None, source: "https://opencode.ai/zen/go/v1/usage".into(), limitations: vec!["Undocumented endpoint; aggregate windows only, no per-model quotas inferred; reset may be absent".into()] })
 }
 pub fn credentials(config: &ProviderConfig) -> Result<String, ProviderError> {
     credentials_with_override(config, std::env::var("OPENCODE_API_KEY").ok().as_deref())

@@ -37,7 +37,11 @@ pub fn parse(value: &Value) -> Result<Reading, ProviderError> {
                 .get("usedPercent")
                 .and_then(Value::as_f64)
                 .ok_or_else(invalid)?;
-            let mins = v.get("windowDurationMins").and_then(Value::as_u64);
+            let mins = v
+                .get("windowDurationMins")
+                .filter(|v| !v.is_null())
+                .map(|v| v.as_u64().ok_or_else(invalid))
+                .transpose()?;
             let reset = v
                 .get("resetsAt")
                 .filter(|v| !v.is_null())
@@ -58,7 +62,7 @@ pub fn parse(value: &Value) -> Result<Reading, ProviderError> {
             "Codex returned no quota windows; ChatGPT authentication is required",
         ));
     }
-    Ok(Reading { quotas, plan: limits.get("planType").and_then(Value::as_str).map(str::to_owned), source: "codex app-server account/rateLimits/read".into(), limitations: vec!["Codex bucket only; bonus credits and conventional ChatGPT chat quotas are not inferred".into()] })
+    Ok(Reading { quotas, account: None, model: None, plan: limits.get("planType").and_then(Value::as_str).map(str::to_owned), source: "codex app-server account/rateLimits/read".into(), limitations: vec!["Codex bucket only; bonus credits and conventional ChatGPT chat quotas are not inferred".into()] })
 }
 impl Provider for Codex {
     fn fetch(&self, config: &ProviderConfig, _: i64) -> Result<Reading, ProviderError> {

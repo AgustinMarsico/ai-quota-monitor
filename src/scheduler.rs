@@ -57,6 +57,8 @@ where
         match fetch(c, timestamp) {
             Ok(reading) => {
                 p.quotas = reading.quotas;
+                p.account = reading.account;
+                p.model = reading.model;
                 p.plan = reading.plan;
                 p.source = reading.source;
                 p.limitations = reading.limitations;

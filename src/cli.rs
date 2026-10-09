@@ -119,7 +119,7 @@ pub fn run(args: Vec<String>) -> Result<i32, String> {
     }
     if provider
         .as_ref()
-        .is_some_and(|p| !["codex", "opencode-go"].contains(&p.as_str()))
+        .is_some_and(|p| !crate::providers::PROVIDER_IDS.contains(&p.as_str()))
         || !(1..=3650).contains(&days)
     {
         return Err("Invalid provider or days".into());

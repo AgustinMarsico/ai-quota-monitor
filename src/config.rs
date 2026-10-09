@@ -102,7 +102,7 @@ impl Config {
         }
         let mut ids = std::collections::HashSet::new();
         for p in &self.providers {
-            if !["codex", "opencode-go"].contains(&p.provider.as_str())
+            if !crate::providers::PROVIDER_IDS.contains(&p.provider.as_str())
                 || !(60..=3600).contains(&p.interval_seconds)
                 || p.profile.is_empty()
                 || p.profile.len() > 64

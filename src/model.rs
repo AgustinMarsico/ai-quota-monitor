@@ -158,6 +158,9 @@ impl Snapshot {
         if self.schema_version != SCHEMA_VERSION {
             return Err("Unsupported cache schema".into());
         }
+        if self.generated_at <= 0 || self.stale_seconds == 0 {
+            return Err("Invalid cache generation or TTL".into());
+        }
         let mut identities = std::collections::HashSet::new();
         for p in &self.providers {
             if p.last_success_at.is_some_and(|t| t <= 0)

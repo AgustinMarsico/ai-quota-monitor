@@ -121,6 +121,8 @@ fn simulated_resume_polls_once_not_catchup() {
     let mut fetch = |_: &ai_quota_monitor::config::ProviderConfig, _| {
         calls += 1;
         Ok(Reading {
+            account: None,
+            model: None,
             quotas: vec![Quota::new("primary", "5h".into(), Some(300), 22.0, None).unwrap()],
             plan: None,
             source: "fixture".into(),
@@ -156,4 +158,33 @@ fn no_idle_disk_rewrite() {
         std::fs::metadata(&loc.cache).unwrap().modified().unwrap(),
         mtime
     );
+}
+
+#[test]
+fn provider_metadata_survives_common_coordinator() {
+    let dir = tempfile::tempdir().unwrap();
+    let loc = Locations {
+        state: dir.path().join("state"),
+        cache: dir.path().join("cache/status.json"),
+        config: dir.path().join("config.json"),
+    };
+    let c = Config {
+        notifications: false,
+        ..Default::default()
+    };
+    let (s, _) = scheduler::update_with(&c, &loc, Some("codex"), true, now(), |_, _| {
+        Ok(Reading {
+            account: Some("fixture-account".into()),
+            model: Some("fixture-model".into()),
+            plan: Some("fixture-plan".into()),
+            quotas: vec![Quota::new("primary", "5h".into(), Some(300), 22.0, None).unwrap()],
+            source: "fixture".into(),
+            limitations: vec![],
+        })
+    })
+    .unwrap();
+    assert_eq!(s.providers[0].account.as_deref(), Some("fixture-account"));
+    let cached = storage::read_cache(&loc.cache).unwrap();
+    assert_eq!(cached.providers[0].model.as_deref(), Some("fixture-model"));
+    assert_eq!(cached.providers[0].plan.as_deref(), Some("fixture-plan"));
 }

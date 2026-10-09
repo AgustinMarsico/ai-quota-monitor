@@ -20,6 +20,8 @@ fn env() -> (tempfile::TempDir, Locations, Config) {
 }
 fn reading(left: f64, reset: Option<i64>) -> Reading {
     Reading {
+        account: None,
+        model: None,
         quotas: vec![Quota::new("primary", "5h".into(), Some(300), 100.0 - left, reset).unwrap()],
         plan: None,
         source: "fixture".into(),
@@ -67,6 +69,10 @@ fn incomplete_windows_are_not_zero() {
 }
 #[test]
 fn invalid_values_rejected() {
+    assert!(codex::parse(
+        &json!({"rateLimits":{"primary":{"usedPercent":5,"windowDurationMins":"bad"}}})
+    )
+    .is_err());
     for value in [-1.0, 101.0, f64::NAN, f64::INFINITY] {
         assert!(Quota::new("x", "x".into(), None, value, None).is_err());
     }
