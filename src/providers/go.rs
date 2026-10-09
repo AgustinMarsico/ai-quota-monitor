@@ -61,8 +61,14 @@ pub fn parse(value: &Value, timestamp: i64) -> Result<Reading, ProviderError> {
     Ok(Reading { quotas, plan: None, source: "https://opencode.ai/zen/go/v1/usage".into(), limitations: vec!["Undocumented endpoint; aggregate windows only, no per-model quotas inferred; reset may be absent".into()] })
 }
 pub fn credentials(config: &ProviderConfig) -> Result<String, ProviderError> {
-    let key = if let Ok(key) = std::env::var("OPENCODE_API_KEY") {
-        key
+    credentials_with_override(config, std::env::var("OPENCODE_API_KEY").ok().as_deref())
+}
+pub fn credentials_with_override(
+    config: &ProviderConfig,
+    override_key: Option<&str>,
+) -> Result<String, ProviderError> {
+    let key = if let Some(key) = override_key {
+        key.to_owned()
     } else {
         let path = config
             .auth_file
@@ -208,5 +214,24 @@ impl Provider for Go {
             ));
         }
         response(&output.stdout, timestamp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn explicit_override_validates_without_reading_credential_files() {
+        let p = ProviderConfig {
+            auth_file: Some("/nonexistent-fixture-auth".into()),
+            ..Default::default()
+        };
+        assert!(credentials_with_override(&p, Some("fixture-key")).is_ok());
+        for bad in ["", "key\nheader", " key", "key\"injection"] {
+            assert_eq!(
+                credentials_with_override(&p, Some(bad)).err().unwrap().kind,
+                ErrorKind::Authentication
+            );
+        }
     }
 }

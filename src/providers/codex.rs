@@ -5,6 +5,7 @@ use crate::{
     model::{duration_label, ErrorKind, ProviderError, Quota},
 };
 use serde_json::{json, Value};
+use std::os::unix::process::CommandExt;
 use std::{
     io::{BufRead, BufReader, Read, Write},
     process::{Command, Stdio},
@@ -63,6 +64,7 @@ impl Provider for Codex {
     fn fetch(&self, config: &ProviderConfig, _: i64) -> Result<Reading, ProviderError> {
         let mut cmd = Command::new(&config.codex_bin);
         cmd.arg("app-server")
+            .process_group(0)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -151,12 +153,23 @@ impl Provider for Codex {
                 parse(&receive(2)?)
             })();
             drop(rx);
+            // SAFETY: child was started in its own process group; no active user
+            // session or pre-existing Codex process belongs to this group.
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
             operation
         })();
-        let _ = child.kill();
+        if matches!(child.try_wait(), Ok(None)) {
+            // SAFETY: only the dedicated group created above is targeted.
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
+            let _ = child.kill();
+        }
         let _ = child.wait();
         result
     }

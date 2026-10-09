@@ -4,6 +4,53 @@ use ai_quota_monitor::{
     providers::{go, Reading},
     scheduler, storage,
 };
+
+#[test]
+fn codex_transport_adverse_responses_are_sanitized() {
+    use ai_quota_monitor::providers::Provider;
+    for (mode, kind) in [
+        ("expired", ErrorKind::Authentication),
+        ("invalid", ErrorKind::InvalidResponse),
+        ("disconnect", ErrorKind::Network),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".fixture-mode"), mode).unwrap();
+        let config = ai_quota_monitor::config::ProviderConfig {
+            codex_bin: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/mock-codex.py"),
+            codex_home: Some(dir.path().into()),
+            ..Default::default()
+        };
+        let error = ai_quota_monitor::providers::codex::Codex
+            .fetch(&config, now())
+            .err()
+            .unwrap();
+        assert_eq!(error.kind, kind);
+        assert!(!error.message.contains("SECRET"));
+    }
+}
+
+#[test]
+fn codex_timeout_reaps_its_own_child() {
+    use ai_quota_monitor::providers::Provider;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".fixture-mode"), "hang").unwrap();
+    let config = ai_quota_monitor::config::ProviderConfig {
+        codex_bin: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mock-codex.py"),
+        codex_home: Some(dir.path().into()),
+        ..Default::default()
+    };
+    let start = std::time::Instant::now();
+    let error = ai_quota_monitor::providers::codex::Codex
+        .fetch(&config, now())
+        .err()
+        .unwrap();
+    assert_eq!(error.kind, ErrorKind::Network);
+    assert!(start.elapsed().as_secs() < 30);
+    let pid = std::fs::read_to_string(dir.path().join(".fixture-pid")).unwrap();
+    assert!(!std::path::PathBuf::from(format!("/proc/{pid}/exe")).exists());
+}
 #[test]
 fn retry_after_http_date() {
     let e = go::response(

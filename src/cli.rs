@@ -23,7 +23,18 @@ pub fn render(snapshot: &Snapshot, compact: bool, metric: &str, color: bool) -> 
             " ~"
         };
         if p.quotas.is_empty() {
-            lines.push(format!("{name}{profile}: ?"));
+            lines.push(if compact {
+                format!("{name}{profile}: ?")
+            } else {
+                format!(
+                    "{name}{profile}: unavailable [{:?}]{}",
+                    p.state,
+                    p.error
+                        .as_ref()
+                        .map(|e| format!("\n  error: {}", e.message))
+                        .unwrap_or_default()
+                )
+            });
             continue;
         }
         for q in &p.quotas {

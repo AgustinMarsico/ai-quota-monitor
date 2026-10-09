@@ -116,9 +116,9 @@ fn credentials_missing_and_invalid() {
         auth_file: Some(dir.path().join("auth.json")),
         ..ProviderConfig::default()
     };
-    // Test process environment has no alternative key (test script unsets it).
+    // Explicit override injection keeps tests independent from user credentials.
     assert_eq!(
-        go::credentials(&p).unwrap_err().kind,
+        go::credentials_with_override(&p, None).unwrap_err().kind,
         ErrorKind::CredentialsMissing
     );
     std::fs::write(
@@ -127,11 +127,11 @@ fn credentials_missing_and_invalid() {
     )
     .unwrap();
     assert_eq!(
-        go::credentials(&p).unwrap_err().kind,
+        go::credentials_with_override(&p, None).unwrap_err().kind,
         ErrorKind::Authentication
     );
     p.auth_file = Some(dir.path().join("missing"));
-    assert!(go::credentials(&p).is_err());
+    assert!(go::credentials_with_override(&p, None).is_err());
 }
 #[test]
 fn stale_and_expired_window() {
