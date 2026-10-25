@@ -113,6 +113,20 @@ probar manualmente sin activar servicios ni tocar la instalación, consultá
 El instalador copia archivos; **no activa servicios ni extensiones** y no cambia
 configuraciones de shell u OpenCode. La activación es un paso explícito posterior.
 
+## Desarrollo asistido por IA y trabajo con agentes
+
+El desarrollo combinó análisis y planificación asistidos por IA con tareas
+delimitadas en OpenCode, revisión independiente según el desarrollador,
+corrección de hallazgos y pruebas offline antes de la aceptación humana. El
+subsistema de notificaciones ilustra este flujo: se separaron política, SQLite y
+transportes; luego se revisaron casos de concurrencia, migración y entrega, y se
+añadieron pruebas de regresión.
+La configuración y el despliegue del servicio fueron decisiones manuales.
+El **plugin OpenCode del producto** es una interfaz para ver cuotas; es distinto
+de **OpenCode como herramienta de desarrollo**. El caso de estudio, sus evidencias
+y los límites de trazabilidad están en
+[`docs/ai-assisted-development.md`](docs/ai-assisted-development.md).
+
 ## Desarrollo
 
 ```bash
