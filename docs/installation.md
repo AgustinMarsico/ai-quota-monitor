@@ -12,7 +12,11 @@ El script copia el binario a `~/.local/bin`, el plugin y schema a
 `~/.config/systemd/user`. Conserva un config existente. No ejecuta systemctl,
 no cambia OpenCode y no habilita GNOME. Registra un manifiesto de archivos.
 
-La unidad referencia el binario instalado, no el directorio fuente. El instalador
+La unidad generada referencia el binario instalado, no el directorio fuente. El
+archivo `systemd/ai-quota-monitor.service` es un ejemplo para rutas
+predeterminadas (`~/.local/bin` y XDG); **no** reemplaza la unidad generada por
+`scripts/install.py` al usar `--prefix` o `--config-dir` personalizados. El
+instalador
 localiza Codex en el PATH y guarda su ruta en el config nuevo. Si usás un wrapper
 con `/usr/bin/env node`, asegurá que Node esté en el PATH del servicio o usá el
 ejecutable nativo de Codex. `doctor` no necesita conexión externa.
@@ -64,8 +68,19 @@ gnome-extensions enable ai-quota@local
 ```
 
 La nueva extensión reemplaza los dos indicadores con una sola lectura de la
-caché, detalle, reinicios y enlaces a ambas páginas. Los originales no se
-deshabilitan automáticamente. Metadata GNOME 48–51; validación visual real pendiente.
+caché, tres modos visuales persistentes, menú compacto, detalles avanzados y enlaces
+a ambas páginas. Los originales no se deshabilitan automáticamente. Metadata
+GNOME 48–51; APIs y GJS comprobados inicialmente con GNOME 50.5 y
+posteriormente con 50.6 en staging.
+
+Para **actualizar solo la extensión**, sin reinstalar el monitor ni sus unidades:
+
+```bash
+python3 scripts/install_gnome.py
+```
+
+En GNOME/Wayland, cerrar sesión y volver a entrar para cargar los módulos nuevos.
+Ver [configuración, modos y validación GNOME](gnome.md).
 
 ## Actualizar y desinstalar
 
@@ -80,6 +95,30 @@ systemctl --user daemon-reload
 ```
 
 La desinstalación rechaza un servicio nuevo activo y elimina únicamente archivos
-del manifiesto cuyo contenido no fue modificado. Conserva configuración, SQLite,
-caché y credenciales. Retirá manualmente la referencia del plugin de OpenCode y
+del manifiesto cuyo contenido no fue modificado. `scripts/install_gnome.py`
+instala la extensión por separado y no actualiza ese manifiesto: si se utilizó
+después, revisar los archivos de GNOME que queden al desinstalar. Conserva
+configuración, SQLite, caché y credenciales. Retirá manualmente la referencia del plugin de OpenCode y
 reiniciá OpenCode. Nunca elimina los monitores originales.
+
+## Logs del daemon basados en eventos
+
+El daemon registra intentos reales, cambios de autenticación, recuperaciones y
+fallos de almacenamiento. No repite cada minuto un error retenido en backoff.
+Usa prefijos `INFO` y `WARN` y omite cuerpos remotos, tokens y texto de errores
+recibido de proveedores.
+
+Ejemplos (timestamps ilustrativos):
+
+```text
+INFO provider=opencode-go profile=default event=query_succeeded
+WARN provider=opencode-go profile=default event=query_failed cause=authentication failures=1 next_attempt_at=1792516308
+INFO provider=opencode-go profile=default event=backoff_started next_attempt_at=1792516308
+INFO provider=opencode-go profile=default event=recovered
+```
+
+`AI_QUOTA_LOG_LEVEL=debug` añade `event=backoff_skipped` una sola vez por perfil
+y plazo de reintento. El nivel se lee al iniciar el daemon: cambiarlo requiere
+reiniciarlo. Los errores persistentes de almacenamiento se reiteran como máximo
+una vez cada cinco minutos, salvo que cambie el tipo de error; la recuperación
+se registra una vez.

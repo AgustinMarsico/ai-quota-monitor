@@ -112,12 +112,15 @@ pub fn open(loc: &Locations) -> Result<Connection, String> {
         .map_err(|_| "Cannot set database permissions")?;
     db.busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|_| "Database timeout setup failed")?;
-    db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+    db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; BEGIN IMMEDIATE;
         CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS samples (id INTEGER PRIMARY KEY, provider TEXT NOT NULL, profile TEXT NOT NULL, sampled_at INTEGER NOT NULL, window TEXT NOT NULL, label TEXT NOT NULL, duration_minutes INTEGER, resets_at INTEGER, used_percent REAL NOT NULL, remaining_percent REAL NOT NULL);
         CREATE INDEX IF NOT EXISTS sample_time ON samples(sampled_at);
         CREATE TABLE IF NOT EXISTS alerts (provider TEXT NOT NULL, profile TEXT NOT NULL, window TEXT NOT NULL, reset_at INTEGER, level INTEGER NOT NULL, PRIMARY KEY(provider, profile, window));
-        CREATE TABLE IF NOT EXISTS imports (source TEXT PRIMARY KEY);") .map_err(|_| "Database schema setup failed")?;
+         CREATE TABLE IF NOT EXISTS imports (source TEXT PRIMARY KEY);
+         CREATE TABLE IF NOT EXISTS notification_quota_state (provider TEXT NOT NULL, profile TEXT NOT NULL, window TEXT NOT NULL, duration_minutes INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY(provider,profile,window,duration_minutes));
+         CREATE TABLE IF NOT EXISTS notification_health_state (provider TEXT NOT NULL, profile TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY(provider,profile));
+         COMMIT;") .map_err(|_| "Database schema setup failed")?;
     Ok(db)
 }
 pub fn durable(db: &Connection, config: &Config) -> Result<Snapshot, String> {
@@ -152,19 +155,55 @@ pub fn durable(db: &Connection, config: &Config) -> Result<Snapshot, String> {
     }
     Ok(snapshot)
 }
-pub struct Alert {
-    pub message: String,
-    pub threshold: u8,
-}
 pub fn save(
     db: &mut Connection,
     loc: &Locations,
     snapshot: &Snapshot,
     successful: &[(String, String)],
     config: &Config,
-) -> Result<Vec<Alert>, String> {
+) -> Result<Vec<crate::notifications::Notification>, String> {
+    let attempts = snapshot
+        .providers
+        .iter()
+        .filter(|p| successful.contains(&(p.provider.clone(), p.profile.clone())))
+        .map(|p| Attempt {
+            provider: p.provider.clone(),
+            profile: p.profile.clone(),
+            at: p.last_success_at.unwrap_or(snapshot.generated_at),
+            succeeded: true,
+            auth_changed: false,
+        })
+        .collect::<Vec<_>>();
+    save_with_attempts(db, loc, snapshot, successful, &attempts, config)
+}
+
+/// Only actual provider requests belong here; skipped backoff cycles never reach policy.
+pub struct Attempt {
+    pub provider: String,
+    pub profile: String,
+    pub at: i64,
+    pub succeeded: bool,
+    pub auth_changed: bool,
+}
+
+pub fn save_with_attempts(
+    db: &mut Connection,
+    loc: &Locations,
+    snapshot: &Snapshot,
+    successful: &[(String, String)],
+    attempts: &[Attempt],
+    config: &Config,
+) -> Result<Vec<crate::notifications::Notification>, String> {
     snapshot.validate()?;
     let tx = db.transaction().map_err(|_| "Cannot begin transaction")?;
+    let prior_snapshot: Option<Snapshot> = tx
+        .query_row("SELECT json FROM state WHERE id=1", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .optional()
+        .map_err(|_| "Cannot read previous state")?
+        .map(|json| serde_json::from_str(&json).map_err(|_| "Invalid previous state"))
+        .transpose()?;
     let mut notifications = vec![];
     for p in snapshot
         .providers
@@ -174,47 +213,195 @@ pub fn save(
         for q in &p.quotas {
             tx.execute("INSERT INTO samples(provider,profile,sampled_at,window,label,duration_minutes,resets_at,used_percent,remaining_percent) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![p.provider,p.profile,p.last_success_at,q.window,q.label,q.duration_minutes,q.resets_at,q.used_percent,q.remaining_percent]).map_err(|_| "Cannot save sample")?;
             let previous: Option<(Option<i64>, u8)> = tx.query_row("SELECT reset_at,level FROM alerts WHERE provider=?1 AND profile=?2 AND window=?3", params![p.provider,p.profile,q.window], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(|_| "Cannot read alert state")?;
-            let level = if q.remaining_percent <= 5.0 {
-                5
-            } else if q.remaining_percent <= 10.0 {
-                10
-            } else if q.remaining_percent <= 20.0 {
-                20
-            } else {
-                100
-            };
-            let new_period =
-                previous
-                    .as_ref()
-                    .is_some_and(|(reset, _)| match (*reset, q.resets_at) {
-                        (Some(a), Some(b)) => (a - b).abs() > 300,
-                        _ => false,
-                    });
-            let old = previous.as_ref().map(|(_, level)| *level).unwrap_or(100);
-            if level < 100 && (new_period || level < old) {
-                notifications.push(Alert {
-                    threshold: level,
-                    message: format!(
-                        "{} [{}] {}: {:.1}% remaining",
-                        p.provider, p.profile, q.label, q.remaining_percent
-                    ),
+            let previous =
+                previous.map(
+                    |(reset_at, level)| crate::notifications::policy::AlertState {
+                        reset_at,
+                        level,
+                    },
+                );
+            let (reset_id, saved_level) = if let Some(policy) = &config.notification_policy {
+                use crate::notifications::policy::{
+                    effective_thresholds, evaluate_configured, PolicyState,
+                };
+                let duration = q.duration_minutes.map_or(-1, |value| value as i64);
+                let json: Option<String> = tx.query_row("SELECT json FROM notification_quota_state WHERE provider=?1 AND profile=?2 AND window=?3 AND duration_minutes=?4", params![p.provider,p.profile,q.window,duration], |r| r.get(0)).optional().map_err(|_| "Cannot read quota policy state")?;
+                let previous_state: Option<PolicyState> = json
+                    .map(|value| {
+                        serde_json::from_str(&value).map_err(|_| "Invalid quota policy state")
+                    })
+                    .transpose()?;
+                let previous_state = previous_state.or_else(|| {
+                    let old_quota = prior_snapshot
+                        .as_ref()?
+                        .providers
+                        .iter()
+                        .find(|old| old.provider == p.provider && old.profile == p.profile)?
+                        .quotas
+                        .iter()
+                        .find(|old| {
+                            old.window == q.window && old.duration_minutes == q.duration_minutes
+                        })?;
+                    let mut state = previous
+                        .clone()
+                        .map(PolicyState::from_legacy)
+                        .unwrap_or_default();
+                    let thresholds =
+                        effective_thresholds(policy, &p.provider, &p.profile, &q.window);
+                    if let Some(covered) = thresholds
+                        .iter()
+                        .copied()
+                        .rfind(|threshold| *threshold <= old_quota.used_percent)
+                    {
+                        state.covered_used_percent =
+                            Some(state.covered_used_percent.unwrap_or(0.0).max(covered));
+                        state.limited = true;
+                    }
+                    state.thresholds_used_percent = thresholds.to_vec();
+                    state.reset_anchor = previous
+                        .as_ref()
+                        .and_then(|legacy| legacy.reset_at)
+                        .or(old_quota.resets_at);
+                    Some(state)
                 });
-            }
-            // With unknown reset, re-arm only after observed recovery above the threshold.
-            let saved_level = if !new_period && q.resets_at.is_some() {
-                old.min(level)
+                let observed_at = attempts
+                    .iter()
+                    .find(|attempt| {
+                        attempt.succeeded
+                            && attempt.provider == p.provider
+                            && attempt.profile == p.profile
+                    })
+                    .map_or(snapshot.generated_at, |attempt| attempt.at);
+                let previous_state = previous_state.map(|mut state| {
+                    if attempts.iter().any(|attempt| {
+                        attempt.provider == p.provider
+                            && attempt.profile == p.profile
+                            && attempt.auth_changed
+                    }) {
+                        state.reset_anchor = q.resets_at;
+                        state.interrupt_recovery();
+                    }
+                    state
+                });
+                let (emitted, state) = evaluate_configured(
+                    &p.provider,
+                    &p.profile,
+                    q,
+                    previous_state,
+                    policy,
+                    observed_at,
+                );
+                notifications.extend(emitted);
+                let json = serde_json::to_string(&state)
+                    .map_err(|_| "Cannot serialize quota policy state")?;
+                tx.execute("INSERT INTO notification_quota_state(provider,profile,window,duration_minutes,json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(provider,profile,window,duration_minutes) DO UPDATE SET json=excluded.json", params![p.provider,p.profile,q.window,duration,json]).map_err(|_| "Cannot save quota policy state")?;
+                let covered = state.covered_used_percent.unwrap_or(0.0);
+                let level = if covered >= 95.0 {
+                    5
+                } else if covered >= 90.0 {
+                    10
+                } else if covered >= 80.0 {
+                    20
+                } else {
+                    100
+                };
+                (state.reset_anchor, level)
             } else {
-                level
-            };
-            let reset_id = if !new_period {
-                previous
-                    .as_ref()
-                    .and_then(|(reset, _)| *reset)
-                    .or(q.resets_at)
-            } else {
-                q.resets_at
+                let (notification, state) =
+                    crate::notifications::policy::evaluate(&p.provider, &p.profile, q, previous);
+                if let Some(notification) = notification {
+                    notifications.push(notification);
+                }
+                (state.reset_at, state.level)
             };
             tx.execute("INSERT INTO alerts(provider,profile,window,reset_at,level) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(provider,profile,window) DO UPDATE SET reset_at=excluded.reset_at,level=excluded.level",params![p.provider,p.profile,q.window,reset_id,saved_level]).map_err(|_| "Cannot save alert state")?;
+        }
+    }
+    if let Some(policy) = &config.notification_policy {
+        use crate::notifications::policy::{evaluate_monitor, MonitorOutcome, MonitorState};
+        for attempt in attempts {
+            // Failed attempts and missing windows break the two-reading recovery
+            // candidate. Cached quotas on error are never fresh observations.
+            let mut stmt = tx.prepare("SELECT window,duration_minutes,json FROM notification_quota_state WHERE provider=?1 AND profile=?2").map_err(|_| "Cannot inspect quota policy states")?;
+            let rows = stmt
+                .query_map(params![attempt.provider, attempt.profile], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(|_| "Cannot inspect quota policy states")?;
+            let states = rows
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "Cannot read quota policy states")?;
+            drop(stmt);
+            for (window, duration, json) in states {
+                let observed = attempt.succeeded
+                    && snapshot
+                        .providers
+                        .iter()
+                        .find(|p| p.provider == attempt.provider && p.profile == attempt.profile)
+                        .is_some_and(|p| {
+                            p.quotas.iter().any(|q| {
+                                q.window == window
+                                    && q.duration_minutes.map_or(-1, |value| value as i64)
+                                        == duration
+                            })
+                        });
+                if !observed {
+                    let mut state: crate::notifications::policy::PolicyState =
+                        serde_json::from_str(&json).map_err(|_| "Invalid quota policy state")?;
+                    state.interrupt_recovery();
+                    let json = serde_json::to_string(&state)
+                        .map_err(|_| "Cannot serialize quota policy state")?;
+                    tx.execute("UPDATE notification_quota_state SET json=?1 WHERE provider=?2 AND profile=?3 AND window=?4 AND duration_minutes=?5", params![json,attempt.provider,attempt.profile,window,duration]).map_err(|_| "Cannot save quota policy state")?;
+                }
+            }
+            let json: Option<String> = tx
+                .query_row(
+                    "SELECT json FROM notification_health_state WHERE provider=?1 AND profile=?2",
+                    params![attempt.provider, attempt.profile],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|_| "Cannot read monitor policy state")?;
+            let previous: Option<MonitorState> = json
+                .map(|value| {
+                    serde_json::from_str(&value).map_err(|_| "Invalid monitor policy state")
+                })
+                .transpose()?;
+            let previous = if attempt.auth_changed {
+                evaluate_monitor(
+                    &attempt.provider,
+                    &attempt.profile,
+                    MonitorOutcome::AuthChanged,
+                    previous,
+                    policy,
+                    attempt.at,
+                )
+                .1
+            } else {
+                previous.unwrap_or_default()
+            };
+            let (event, state) = evaluate_monitor(
+                &attempt.provider,
+                &attempt.profile,
+                if attempt.succeeded {
+                    MonitorOutcome::Succeeded
+                } else {
+                    MonitorOutcome::Failed
+                },
+                Some(previous),
+                policy,
+                attempt.at,
+            );
+            if let Some(event) = event {
+                notifications.push(event);
+            }
+            let json = serde_json::to_string(&state)
+                .map_err(|_| "Cannot serialize monitor policy state")?;
+            tx.execute("INSERT INTO notification_health_state(provider,profile,json) VALUES(?1,?2,?3) ON CONFLICT(provider,profile) DO UPDATE SET json=excluded.json", params![attempt.provider,attempt.profile,json]).map_err(|_| "Cannot save monitor policy state")?;
         }
     }
     let bytes = serde_json::to_vec(snapshot).map_err(|_| "Cannot serialize state")?;

@@ -16,6 +16,81 @@ fn invalid() -> ProviderError {
         "Invalid OpenCode Go quota response",
     )
 }
+pub const CONSOLE_USAGE_URL: &str = "https://opencode.ai/console/api/go/status";
+
+/// Console subscription meters only. Never substitute a prepaid balance or local estimates.
+pub fn parse_console(value: &Value) -> Result<Reading, ProviderError> {
+    let access = value
+        .get("access")
+        .filter(|v| !v.is_null())
+        .ok_or_else(|| {
+            ProviderError::new(
+                ErrorKind::Unavailable,
+                "Go subscription access not reported",
+            )
+        })?;
+    let meters = access
+        .get("meters")
+        .and_then(Value::as_object)
+        .ok_or_else(invalid)?;
+    let mut quotas = Vec::new();
+    for (field, window, label, minutes) in [
+        ("fiveHour", "rolling", "5h", Some(300)),
+        ("week", "weekly", "7d", Some(10080)),
+        ("month", "monthly", "month", None),
+    ] {
+        let Some(meter) = meters.get(field).filter(|v| !v.is_null()) else {
+            continue;
+        };
+        let amount = |key: &str| -> Result<f64, ProviderError> {
+            let v = meter.get(key).ok_or_else(invalid)?;
+            let n = if let Some(s) = v.as_str() {
+                if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+                    return Err(invalid());
+                }
+                s.parse::<f64>().map_err(|_| invalid())?
+            } else {
+                v.as_f64().ok_or_else(invalid)?
+            };
+            if !n.is_finite() || n < 0.0 {
+                return Err(invalid());
+            }
+            Ok(n)
+        };
+        let limit = amount("limitMicroCents")?;
+        let used = amount("usedMicroCents")?;
+        if limit <= 0.0 {
+            return Err(invalid());
+        }
+        let reset = meter.get("resetsAt").filter(|v| !v.is_null());
+        // Do not treat the subscription's endsAt as a reported meter reset.
+        let resets_at = reset
+            .map(|v| {
+                chrono::DateTime::parse_from_rfc3339(v.as_str().ok_or_else(invalid)?)
+                    .map(|t| t.timestamp())
+                    .map_err(|_| invalid())
+            })
+            .transpose()?;
+        quotas.push(Quota::new(
+            window,
+            label.into(),
+            minutes,
+            used / limit * 100.0,
+            resets_at,
+        )?);
+    }
+    if quotas.is_empty() {
+        return Err(ProviderError::new(
+            ErrorKind::Unavailable,
+            "Go returned no subscription meters",
+        ));
+    }
+    Ok(Reading {
+        quotas, account: None, model: None, plan: None,
+        source: CONSOLE_USAGE_URL.into(),
+        limitations: vec!["Console Go status is not a documented quota API; only reported subscription meters are shown; missing windows and resets are not estimated".into()],
+    })
+}
 pub fn parse(value: &Value, timestamp: i64) -> Result<Reading, ProviderError> {
     let usage = value
         .get("usage")
@@ -77,7 +152,7 @@ pub fn credentials_with_override(
         let data = std::fs::read(path).map_err(|_| {
             ProviderError::new(
                 ErrorKind::CredentialsMissing,
-                "Cannot read OpenCode credentials; use /connect",
+                "Cannot read legacy OpenCode API key; Console V2 requires separate authentication; see docs/opencode-go.md",
             )
         })?;
         let auth: Value = serde_json::from_slice(&data).map_err(|_| {
@@ -92,7 +167,7 @@ pub fn credentials_with_override(
             .ok_or_else(|| {
                 ProviderError::new(
                     ErrorKind::CredentialsMissing,
-                    "OpenCode Go key missing; use /connect",
+                    "Legacy OpenCode Go API key missing; Console V2 requires separate authentication; see docs/opencode-go.md",
                 )
             })?
             .to_owned()
@@ -111,6 +186,19 @@ pub fn credentials_with_override(
     Ok(key)
 }
 pub fn response(bytes: &[u8], timestamp: i64) -> Result<Reading, ProviderError> {
+    response_with_parser(bytes, timestamp, parse,
+        "OpenCode Go rejected credentials; V2 Console sign-in does not update the legacy API key. See docs/opencode-go.md")
+}
+pub fn console_response(bytes: &[u8], timestamp: i64) -> Result<Reading, ProviderError> {
+    response_with_parser(bytes, timestamp, |value, _| parse_console(value),
+        "Console rejected the monitor's OAuth session; it may be expired or revoked. See docs/opencode-go.md to reauthorize")
+}
+fn response_with_parser(
+    bytes: &[u8],
+    timestamp: i64,
+    parser: fn(&Value, i64) -> Result<Reading, ProviderError>,
+    authentication_message: &str,
+) -> Result<Reading, ProviderError> {
     if bytes.len() > 1_100_000 {
         return Err(invalid());
     }
@@ -143,13 +231,17 @@ pub fn response(bytes: &[u8], timestamp: i64) -> Result<Reading, ProviderError> 
         rest = body;
     }
     match status.trim() {
-        "200" => parse(
+        "200" => parser(
             &serde_json::from_str::<Value>(rest).map_err(|_| invalid())?,
             timestamp,
         ),
-        "401" | "403" => Err(ProviderError::new(
+        "401" => Err(ProviderError::new(
             ErrorKind::Authentication,
-            "OpenCode Go rejected credentials; use /connect",
+            authentication_message,
+        )),
+        "403" => Err(ProviderError::new(
+            ErrorKind::Authentication,
+            "OpenCode Go denied workspace access or credential permission; reconnecting may not resolve a scope mismatch",
         )),
         "429" => Err(ProviderError {
             kind: ErrorKind::RateLimited,
@@ -164,6 +256,9 @@ pub fn response(bytes: &[u8], timestamp: i64) -> Result<Reading, ProviderError> 
 }
 impl Provider for Go {
     fn fetch(&self, config: &ProviderConfig, _: i64) -> Result<Reading, ProviderError> {
+        if config.go_auth == crate::config::GoAuth::ConsoleOauth {
+            return super::go_oauth::fetch(config, false);
+        }
         let key = credentials(config)?;
         let mut child = Command::new("curl")
             .args([

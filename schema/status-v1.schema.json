@@ -90,7 +90,8 @@
           "anyOf": [{ "type": "null" }, { "$ref": "#/definitions/error" }]
         },
         "consecutive_failures": { "type": "integer", "minimum": 0 },
-        "next_attempt_at": { "type": "integer", "minimum": 0 }
+        "next_attempt_at": { "type": "integer", "minimum": 0 },
+        "go_auth": { "enum": ["api_key", "console_oauth"] }
       }
     }
   }

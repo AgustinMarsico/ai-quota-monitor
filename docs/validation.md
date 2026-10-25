@@ -1,102 +1,77 @@
-# Validación de entrega
+# Validación y pruebas aisladas
 
-Entorno: Fedora/Linux, Rust/Cargo 1.98.0, Node 24.15.0 local al proyecto,
-OpenCode 1.18.35, curl 8.18.0. Validación realizada el 9 de octubre de 2026.
+Los comandos de esta página operan sobre fixtures y directorios temporales, no
+sobre la instalación ni la base SQLite del servicio activo. Las pruebas con
+`curl` simulado no publican en ntfy.sh ni consultan cuentas reales. Para ejecutar
+el conjunto completo se requieren Rust/Cargo, Python 3, Ruff, Node/npm y,
+para los tests nativos GNOME, GJS y las bibliotecas de GNOME Shell.
 
-## Resultados
+## Verificación del árbol de trabajo (24 de octubre de 2026)
 
 | Control | Resultado |
 |---|---|
-| `cargo build --release --locked` | PASS |
 | `cargo fmt --check` | PASS |
-| `cargo clippy --locked --all-targets -- -D warnings` | PASS, sin advertencias |
-| `cargo test --locked` | 30 pruebas: 1 unitaria + 29 de integración, PASS |
-| `python3 tests/operations.py` | 7 pruebas operativas, PASS |
-| Ruff formato y lint de scripts/tests Python | PASS |
-| TypeScript `tsc --noEmit` | PASS |
-| Prettier de plugin y renderer compartido | PASS |
-| Node tests (vista + JSON Schema contra CLI Rust) | 5 pruebas, PASS |
-| GNOME con mocks de lifecycle/menú/caché | PASS |
-| GJS/Gio nativo, lectura asíncrona y renderer compartido | PASS |
-| Plugin mínimo en OpenCode real, PTY aislada | PASS |
-| Plugin completo en OpenCode real: barra, cambio de caché, `/quota` | PASS |
-| Plugin desde ubicación instalada en staging, sin node_modules copiados | PASS |
-| Instalación/desinstalación en staging y `systemd-analyze --user verify` | PASS |
-| `npm audit` con lockfile y overrides de desarrollo | 0 vulnerabilidades reportadas |
-| Pruebas originales, compiladas con target y temporales en el proyecto nuevo | Codex 4 + Go 6, PASS |
-| Smoke GNOME de ambos proyectos originales, solo lectura | 2, PASS |
+| `cargo clippy --locked --offline --all-targets -- -D warnings` | PASS |
+| `env -u OPENCODE_API_KEY cargo test --locked --offline` | PASS; 84 tests Rust (incluida la prueba FIFO OAuth y ambos ejemplos de configuración) |
+| `python3 tests/operations.py` | PASS; 11 pruebas de procesos y transportes simulados |
+| `python3 tests/oauth_operations.py` | PASS; 3 pruebas OAuth aisladas |
+| Ruff, formato y lint de scripts/tests | PASS después de alinear el formato |
+| TypeScript y Prettier | PASS con Node local ya disponible |
+| Plugin OpenCode Node | PASS; 5 tests |
+| GNOME Node | PASS; presentación y lifecycle |
+| GNOME GJS nativo, schema en memoria | PASS en staging, GNOME Shell 50.6 |
+| `git diff --check` | PASS |
 
-Los tests cubren porcentajes, ventanas múltiples, valores parciales/ausentes,
-credenciales inexistentes/expiradas, HTTP 401/403/429, Retry-After numérico y fecha,
-JSON inválido, desconexión, timeout real Codex de 25 segundos y recolección de su
-proceso hijo, obsolescencia, ventanas vencidas, lectores concurrentes, escritores
-excluidos, recuperación durable, metadata común y reinicio/backoff.
-
-Las pruebas operativas verifican SIGTERM, SIGKILL, exclusión de segundo daemon,
-recuperación de caché sin nueva consulta prematura, curl simulado sin secreto en
-argv/salida, importación de SQLite con WAL sin modificar origen, idempotencia,
-staging/uninstall preservando config, composición de PS1 Bash, `check` sin escritura,
-reinicios relativos calculados después de la respuesta y avisos urgentes, deduplicados
-y acotados con un notificador simulado. No se enviaron notificaciones reales.
-
-El JSON Schema se compila independientemente con Ajv y valida salidas reales de
-la CLI, tanto sin muestras como con una adquisición simulada completa.
-
-## Rendimiento
-
-100 ejecuciones del binario release con caché local: **mediana 1,07 ms, p95 1,53 ms,
-máximo 2,23 ms**, incluyendo creación del proceso. No se hicieron peticiones de red.
-Reproducible con `python3 scripts/benchmark.py`, después de ejecutar la demo.
-Es una medición de esta máquina, no una garantía para otros sistemas.
-
-## Reproducir
-
-Núcleo y operaciones:
+Los tests nuevos de `tests/policy_storage.rs` cubren SQLite previa, migración
+repetida sin replay, duración distinta, 100% histórico, deduplicación tras
+reinicio, modo desactivado y confirmación de recuperación interrumpida por fallo
+o ventana ausente. `tests/operations.py` verifica que `status` y `check` no
+escriben, que `notifications test` no toca SQLite, que `writer.lock` se libera
+antes de entregar y que los fallos ntfy no alteran las consultas.
 
 ```bash
-cargo build --release --locked
 cargo fmt --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
+cargo clippy --locked --offline --all-targets -- -D warnings
+env -u OPENCODE_API_KEY cargo test --locked --offline
 python3 tests/operations.py
+python3 tests/oauth_operations.py
+git diff --check
 ```
 
-Suite completa (Node/npm instalados localmente o disponibles en PATH):
+Si ya están disponibles localmente Ruff y Node (no instalar paquetes para
+ejecutar una auditoría offline), ejecutar también:
 
 ```bash
-python3 -m venv target/test-env
-target/test-env/bin/pip install -r tests/requirements.txt
-npm --prefix integrations/opencode ci --ignore-scripts
-scripts/check.sh
+target/test-env/bin/ruff format --check scripts tests
+target/test-env/bin/ruff check --cache-dir target/ruff-cache scripts tests
+npm --prefix integrations/opencode run typecheck
+npm --prefix integrations/opencode run lint
+npm --prefix integrations/opencode test
+node tests/gnome.mjs
 ```
 
-Prueba TUI real: comandos en [opencode.md](opencode.md). Requiere OpenCode y pyte;
-no depende de una cuenta autenticada ni envía prompts al modelo fixture.
-
-Prueba GJS:
+`scripts/check.sh` reúne las verificaciones del núcleo, Python, OpenCode y GNOME
+Node; requiere esas herramientas en `PATH`. La prueba GJS nativa es separada:
 
 ```bash
-python3 scripts/demo.py
-gjs -m tests/gjs.mjs sandbox/cache/status.json
+python3 scripts/install_gnome.py --destination target/gnome-test/ai-quota@local
+env GSETTINGS_BACKEND=memory \
+  GI_TYPELIB_PATH=/usr/lib64/gnome-shell:/usr/lib64/mutter-18 \
+  LD_LIBRARY_PATH=/usr/lib64/gnome-shell:/usr/lib64/mutter-18 \
+  gjs -m tests/gjs-gnome.mjs target/gnome-test/ai-quota@local/schemas
 ```
 
-## Verificación externa pendiente
+Esas rutas GNOME son propias de Fedora con GNOME Shell 50; ajustarlas según el
+sistema. La validación aislada no sustituye probar voluntariamente la apariencia
+en una sesión GNOME real ni la entrega a un topic propio.
 
-- Consulta del nuevo binario contra las cuentas reales Codex/Go: adaptadores probados
-  con mocks; las cachés originales mostraron éxito en la auditoría, pero eso no
-  sustituye una consulta real de la nueva implementación.
-- Habilitación, apariencia y compatibilidad exacta de la extensión dentro de tu
-  sesión GNOME. Se verificaron mocks y GJS/Gio nativo, no se habilitó la extensión.
-- Activación del nuevo servicio dentro de tu manager systemd real y suspensión
-  física del equipo. Se validó unidad en staging, procesos reales aislados y avance
-  de reloj simulado para reanudación; no se suspendió tu sesión.
-- Starship y Zsh: ejemplos entregados; estos ejecutables no estaban instalados en
-  el PATH inspeccionado. Bash sí fue probado.
-- Entrega de notificaciones por el escritorio: lógica y deduplicación probadas;
-  no se enviaron alertas a tu sesión durante las pruebas.
+## Registro histórico
 
-Los dos servicios originales permanecieron activos, con cero reinicios registrados.
-`ai-quota-monitor.service` no está instalado ni habilitado en la sesión real.
-No se cambiaron archivos fuente originales, configuraciones de shell/OpenCode ni
-credenciales. Las instalaciones y pruebas visuales se hicieron en destinos nuevos
-dentro del proyecto.
+La validación inicial del **9 de octubre de 2026** (antes de OAuth Console,
+políticas avanzadas y la actualización GNOME) registró 30 tests Rust, 7 tests
+operativos y una mediana de **1,07 ms**, p95 **1,53 ms**, para 100 ejecuciones
+release de `status` contra caché local. Es una medición de aquella máquina, no
+un resultado de rendimiento nuevo ni una garantía. Se reproduce, si se desea,
+con `python3 scripts/benchmark.py` tras preparar la demo. Las validaciones de
+un servicio o cuenta real requieren decisión del operador y no se infieren de
+esos fixtures.

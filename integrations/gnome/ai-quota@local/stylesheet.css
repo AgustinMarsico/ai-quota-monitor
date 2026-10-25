@@ -1,1 +1,54 @@
-.ai-quota-label { font-weight: 600; padding: 0 5px; }
+.ai-quota-label {
+  font-weight: 600;
+  padding: 0 2px;
+  max-width: 48em;
+}
+.ai-quota-menu {
+  max-width: 34em;
+}
+.ai-quota-heading {
+  font-weight: bold;
+  padding-top: 8px;
+  padding-bottom: 3px;
+}
+.ai-quota-heading StLabel {
+  max-width: 18em;
+}
+.ai-quota-status {
+  font-size: 0.85em;
+  font-weight: normal;
+  color: #9a9996;
+}
+.ai-quota-row {
+  spacing: 10px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.ai-quota-window-title {
+  max-width: 16em;
+}
+.ai-quota-percent {
+  min-width: 6em;
+  text-align: right;
+}
+.ai-quota-bar {
+  width: 5em;
+  -barlevel-height: 4px;
+}
+.ai-quota-warning {
+  color: #e5a50a;
+}
+.ai-quota-warning .ai-quota-bar {
+  -barlevel-active-background-color: #e5a50a;
+}
+.ai-quota-attention {
+  color: #c0bfbc;
+}
+.ai-quota-detail {
+  font-size: 0.9em;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.ai-quota-detail StLabel {
+  max-width: 28em;
+}

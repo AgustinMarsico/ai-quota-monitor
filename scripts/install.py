@@ -8,6 +8,8 @@ import os
 import shutil
 from pathlib import Path
 
+from install_gnome import install_extension
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--prefix", type=Path, default=Path.home() / ".local")
 parser.add_argument(
@@ -93,12 +95,13 @@ manifest.append(
     {"path": str(unit), "sha256": hashlib.sha256(unit.read_bytes()).hexdigest()}
 )
 if args.gnome_dir:
-    for source in (root / "integrations/gnome/ai-quota@local").iterdir():
-        install(source, args.gnome_dir / "ai-quota@local" / source.name)
-    install(
-        root / "integrations/shared/view.mjs",
-        args.gnome_dir / "ai-quota@local/view.mjs",
-    )
+    for destination in install_extension(args.gnome_dir.resolve() / "ai-quota@local"):
+        manifest.append(
+            {
+                "path": str(destination.resolve()),
+                "sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
+            }
+        )
 (share / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print(f"Installed {prefix / 'bin/ai-quota'}; configuration preserved at {config}")
 print(

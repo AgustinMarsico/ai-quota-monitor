@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.ai-quota" path="/org/gnome/shell/extensions/ai-quota/">
+    <key name="display-mode" type="s">
+      <choices>
+        <choice value="compact"/>
+        <choice value="minimal"/>
+        <choice value="full"/>
+      </choices>
+      <default>'compact'</default>
+      <summary>Modo de visualización de la barra superior</summary>
+      <description>Compacto selecciona el menor porcentaje restante por proveedor; mínimo oculta el período; completo muestra todas las ventanas.</description>
+    </key>
+  </schema>
+</schemalist>

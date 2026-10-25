@@ -1,0 +1,11 @@
+{
+  "providers": [
+    {
+      "provider": "codex"
+    },
+    {
+      "provider": "opencode-go",
+      "go_auth": "console_oauth"
+    }
+  ]
+}

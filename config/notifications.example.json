@@ -1,0 +1,42 @@
+{
+  "notifications": true,
+  "notification_transports": {
+    "desktop": true,
+    "ntfy": {
+      "enabled": false,
+      "server_url": "https://ntfy.sh",
+      "topic": "REPLACE_WITH_YOUR_PRIVATE_TOPIC",
+      "token_file": null
+    }
+  },
+  "notification_policy": {
+    "thresholds_used_percent": [80, 90, 95, 100],
+    "overrides": [
+      {
+        "provider": "opencode-go",
+        "profile": "default",
+        "window": "monthly",
+        "thresholds_used_percent": [90, 95, 100]
+      }
+    ],
+    "events": {
+      "threshold": true,
+      "quota_renewed": true,
+      "quota_recovered": true,
+      "monitor_failed": true,
+      "monitor_recovered": true
+    },
+    "recovery": { "margin_percent": 5, "confirmations": 2 },
+    "monitor_failure": {
+      "consecutive_attempts": 3,
+      "minimum_duration_seconds": 600
+    }
+  },
+  "providers": [
+    { "provider": "codex", "profile": "default" },
+    { "provider": "opencode-go", "profile": "default" },
+    { "provider": "codex", "profile": "second", "enabled": false },
+    { "provider": "opencode-go", "profile": "console", "enabled": false,
+      "go_auth": "console_oauth" }
+  ]
+}

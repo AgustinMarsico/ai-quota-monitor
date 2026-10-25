@@ -24,10 +24,14 @@ No se leen ni copian tokens Codex. La CLI upstream puede gestionar su propio
 refresh OAuth/logging de acuerdo con su configuración; el monitor no escribe
 credenciales ni llama métodos de login/logout.
 
-Go: lee auth.json sin modificarlo, o un override de entorno. La clave se valida
+Go en modo `api_key`: lee auth.json sin modificarlo, o un override de entorno. La clave se valida
 antes de enviarse a curl por stdin. No aparece en argv, archivos temporales,
 SQLite, JSON, errores o doctor. curl ignora ~/.curlrc, no sigue redirecciones,
 acepta solo HTTPS y usa un destino fijo con timeouts y límite de respuesta.
+Go en modo `console_oauth` usa credenciales privadas del monitor, nunca el
+archivo de OpenCode ni el override de API key. Sus tokens se guardan con permisos
+privados y se pasan a curl por stdin; ante un refresh de resultado incierto no
+reutiliza el token. Ver [OpenCode Go y Console](opencode-go.md).
 La ausencia de credenciales y HTTP 401/403 se distinguen de conectividad y 429.
 
 El endpoint `https://opencode.ai/zen/go/v1/usage` está observado en CodexBar y en

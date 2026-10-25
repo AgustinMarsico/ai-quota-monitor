@@ -6,3 +6,17 @@
 *.tmp
 .ruff_cache/
 __pycache__/
+# Local credentials and per-user configuration; version *.example.json instead.
+.env
+.env.*
+!.env.example
+!.env.sample
+/config.json
+/auth.json
+/credentials.json
+/config/*.local.json
+/config/auth.json
+/config/credentials.json
+/credentials/
+/secrets/
+/logs/

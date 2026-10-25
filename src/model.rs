@@ -1,3 +1,4 @@
+use crate::config::GoAuth;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,7 +17,7 @@ pub enum DataState {
     Unavailable,
     Error,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
     Authentication,
@@ -104,6 +105,10 @@ pub struct ProviderStatus {
     pub error: Option<ProviderError>,
     pub consecutive_failures: u32,
     pub next_attempt_at: i64,
+    /// Non-secret authentication method used for the last Go request.
+    /// Absent in snapshots written by earlier versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub go_auth: Option<GoAuth>,
 }
 impl ProviderStatus {
     pub fn empty(provider: &str, profile: &str) -> Self {
@@ -122,6 +127,7 @@ impl ProviderStatus {
             error: None,
             consecutive_failures: 0,
             next_attempt_at: 0,
+            go_auth: None,
         }
     }
     pub fn age_state(&mut self, timestamp: i64, stale_seconds: u64) {

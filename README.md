@@ -14,12 +14,14 @@ restauró la cuota. Fechas ausentes son `null`, no cero.
 
 ## Compilar y probar sin afectar la sesión
 
-Requisitos del núcleo: Rust >= 1.89, Cargo, compilador C/enlazador (GCC), Python 3 para scripts/pruebas.
-En ejecución real: Codex CLI autenticado con ChatGPT, `curl` para Go;
-`notify-send` es opcional para alertas de escritorio.
+Requisitos del núcleo: Linux, Rust >= 1.89, Cargo y compilador C/enlazador.
+Python 3 se usa para instalación y pruebas. En ejecución: Codex CLI autenticado
+para Codex y `curl` para OpenCode Go y ntfy. `notify-send` es opcional para
+alertas de escritorio; ntfy requiere configuración explícita. El plugin OpenCode
+y la extensión GNOME son opcionales.
 
 ```bash
-cd ~/Descargas/monitor/ai-quota-monitor
+# Desde la raíz del checkout:
 cargo build --release --locked
 python3 scripts/demo.py
 ./target/release/ai-quota --config sandbox/config.json --cache sandbox/cache/status.json status --compact
@@ -45,6 +47,7 @@ ai-quota doctor --json
 ai-quota history --days 7
 ai-quota export --days 30 > cuotas.csv
 ai-quota daemon
+ai-quota notifications test  # publica una prueba solo en transportes habilitados
 ```
 
 **`status` no hace red, no inicia proveedores y no abre SQLite.** Lee la caché y
@@ -68,26 +71,43 @@ con error; 2 configuración, argumentos, caché o almacenamiento inválidos.
 - Estado durable: `$XDG_STATE_HOME/ai-quota/usage.sqlite3`.
 - Caché: `$XDG_CACHE_HOME/ai-quota/status.json`.
 - Archivo de ejemplo: [`config/example.json`](config/example.json).
-- Credenciales Go: `$XDG_DATA_HOME/opencode/auth.json`, o ruta `auth_file` por perfil.
+- [Ejemplo opt-in de políticas y transportes](config/notifications.example.json).
+- Go con `go_auth: "api_key"`: `$XDG_DATA_HOME/opencode/auth.json`, o `auth_file`
+  por perfil. Go con `go_auth: "console_oauth"` usa una sesión independiente,
+  creada mediante `ai-quota go-login --profile NAME`.
 - Codex usa su autenticación existente. Puede configurarse `codex_bin` y `codex_home`.
-- `OPENCODE_API_KEY` es un override opcional; afecta todos los perfiles Go del proceso.
+- `OPENCODE_API_KEY` es un override opcional **solo para perfiles Go `api_key`**;
+  no se envía al endpoint Console.
 
 Los proveedores pueden desactivarse y tener perfiles independientes. Un perfil
-Codex adicional necesita su propio `codex_home`; Go, su propio `auth_file`.
+Codex adicional necesita su propio `codex_home`; Go `api_key`, su propio
+`auth_file`; Go Console, su propio `console_auth_file` o almacenamiento por perfil.
 Cuenta y modelo permanecen `null` cuando no se informan. El plan se conserva
 únicamente si Codex lo entrega. No se infieren cuotas por modelo.
 
 No se elimina historial por defecto: `retention_days: null`. Si configurás un
 entero, autorizás la retención de ese número de días **en la base nueva**.
 
+Las notificaciones conservan los umbrales legacy de 80/90/95% consumido
+mientras no configures `notification_policy`. La política nueva es opt-in:
+permite `thresholds_used_percent`, overrides por proveedor/perfil/ventana,
+eventos de renovación y recuperación de cuota, y fallos/recuperación del
+monitor con margen, confirmaciones y tiempo mínimo. La entrega sigue siendo
+best-effort; `notifications: false` la desactiva. Para configurar, migrar y
+probar manualmente sin activar servicios ni tocar la instalación, consultá
+[`docs/notifications.md`](docs/notifications.md).
+
 ## Interfaces e instalación
 
 - [Instalación y systemd](docs/installation.md)
 - [Migración e historial](docs/migration.md)
+- [Modos de autenticación OpenCode Go y OAuth Console](docs/opencode-go.md)
 - [Bash, Zsh y Starship](docs/terminal.md)
 - [Plugin visual OpenCode](docs/opencode.md)
+- [Extensión GNOME: modos visuales y actualización independiente](docs/gnome.md)
 - [Arquitectura y contrato JSON](docs/architecture.md)
 - [Seguridad, auditoría y límites](docs/audit.md)
+- [Notificaciones de escritorio y ntfy](docs/notifications.md)
 - [Pruebas y verificaciones](docs/validation.md)
 
 El instalador copia archivos; **no activa servicios ni extensiones** y no cambia
@@ -100,6 +120,7 @@ cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 env -u OPENCODE_API_KEY cargo test --locked
 python3 tests/operations.py
+python3 tests/oauth_operations.py
 ```
 
 Para interfaces, Node >=24.15 y npm (solo desarrollo):

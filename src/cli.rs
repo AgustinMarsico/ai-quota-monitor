@@ -67,7 +67,7 @@ pub fn render(snapshot: &Snapshot, compact: bool, metric: &str, color: bool) -> 
     }
     lines.join(if compact { " | " } else { "\n" })
 }
-const HELP:&str="AI Quota Monitor\n\nCommands:\n  status [--json|--compact] [--provider codex|opencode-go]\n  refresh [--provider PROVIDER]\n  check [--provider PROVIDER]  Query without persistence or notifications\n  daemon\n  doctor [--json]\n  history [--days N] [--provider PROVIDER]\n  export [--days N] [--provider PROVIDER]\n  migrate --from DIRECTORY --provider PROVIDER\n\nOptions: --config PATH, --state-dir PATH, --cache PATH, --color auto|always|never, --metric remaining|used\nstatus never performs network requests. '~' means stale; '?' means unavailable.\n";
+const HELP:&str="AI Quota Monitor\n\nCommands:\n  status [--json|--compact] [--provider codex|opencode-go]\n  refresh [--provider PROVIDER]\n  check [--provider PROVIDER]  Query without persistence or notifications\n  notifications test          Test enabled notification transports\n  daemon\n  doctor [--json]\n  history [--days N] [--provider PROVIDER]\n  export [--days N] [--provider PROVIDER]\n  migrate --from DIRECTORY --provider PROVIDER\n\nOptions: --config PATH, --state-dir PATH, --cache PATH, --color auto|always|never, --metric remaining|used\nstatus never performs network requests. '~' means stale; '?' means unavailable.\n";
 pub fn run(args: Vec<String>) -> Result<i32, String> {
     let mut loc = Locations::default();
     let mut command = "status".to_string();
@@ -78,12 +78,15 @@ pub fn run(args: Vec<String>) -> Result<i32, String> {
     let mut metric = None;
     let mut days = 7;
     let mut from = None;
+    let mut profile = None;
+    let mut notification_action: Option<String> = None;
     let mut iter = args.into_iter();
     let mut seen_command = false;
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--help" | "-h" => {
                 print!("{HELP}");
+                println!("  go-login [--profile NAME]  Authorize a monitor-owned Console OAuth session\nSee docs/opencode-go.md for Go authentication and staged diagnostics.");
                 return Ok(0);
             }
             "--version" | "-V" => {
@@ -96,6 +99,7 @@ pub fn run(args: Vec<String>) -> Result<i32, String> {
             "--state-dir" => loc.state = iter.next().ok_or("Missing --state-dir value")?.into(),
             "--cache" => loc.cache = iter.next().ok_or("Missing --cache value")?.into(),
             "--provider" => provider = Some(iter.next().ok_or("Missing provider")?),
+            "--profile" => profile = Some(iter.next().ok_or("Missing profile")?),
             "--color" => color = Some(iter.next().ok_or("Missing color")?),
             "--metric" => metric = Some(iter.next().ok_or("Missing metric")?),
             "--days" => {
@@ -110,12 +114,25 @@ pub fn run(args: Vec<String>) -> Result<i32, String> {
                     iter.next().ok_or("Missing source")?,
                 ))
             }
+            s if !s.starts_with('-')
+                && seen_command
+                && command == "notifications"
+                && notification_action.is_none() =>
+            {
+                notification_action = Some(s.into());
+            }
             s if !s.starts_with('-') && !seen_command => {
                 command = s.into();
                 seen_command = true
             }
             _ => return Err("Unknown argument; use --help".into()),
         }
+    }
+    if command == "notifications" {
+        if notification_action.as_deref() != Some("test") {
+            return Err("Usage: ai-quota notifications test".into());
+        }
+        command = "notifications-test".into();
     }
     if provider
         .as_ref()
@@ -125,6 +142,9 @@ pub fn run(args: Vec<String>) -> Result<i32, String> {
         return Err("Invalid provider or days".into());
     }
     let config = Config::load(&loc.config)?;
+    if profile.is_some() && command != "go-login" {
+        return Err("--profile is only supported by go-login".into());
+    }
     let metric = metric.unwrap_or_else(|| config.compact_metric.clone());
     let color = color.unwrap_or_else(|| config.compact_color.clone());
     if !["remaining", "used"].contains(&metric.as_str())
@@ -151,6 +171,71 @@ pub fn run(args: Vec<String>) -> Result<i32, String> {
         Ok(())
     };
     match command.as_str() {
+        "go-login" => {
+            if provider.as_ref().is_some_and(|p| p != "opencode-go") {
+                return Err("go-login only supports opencode-go".into());
+            }
+            let profiles: Vec<_> = config
+                .providers
+                .iter()
+                .filter(|p| {
+                    p.enabled
+                        && p.provider == "opencode-go"
+                        && p.go_auth == crate::config::GoAuth::ConsoleOauth
+                        && profile.as_ref().is_none_or(|name| name == &p.profile)
+                })
+                .collect();
+            if profiles.len() != 1 {
+                return Err("Select exactly one enabled Go console_oauth profile using --profile; see docs/opencode-go.md".into());
+            }
+            crate::providers::go_oauth::login(profiles[0]).map_err(|error| error.message)?;
+            Ok(0)
+        }
+        "notifications-test" => {
+            let notification = crate::notifications::Notification {
+                event: crate::notifications::NotificationEvent::Diagnostic,
+                observed_at: Some(crate::model::now()),
+                provider: "ai-quota-monitor".into(),
+                profile: "diagnostic".into(),
+                window: "test".into(),
+                label: "transport".into(),
+                used_percent: 0.0,
+                remaining_percent: 100.0,
+                resets_at: None,
+                threshold: 0.0,
+                severity: crate::notifications::Severity::Warning,
+                title: "AI Quota Monitor — Test".into(),
+                message: "Notificación de prueba del transporte configurado.".into(),
+            };
+            let results = crate::notifications::runtime::Runtime::test_transports(
+                &config,
+                notification,
+                std::time::Duration::from_secs(12),
+            );
+            let mut any_enabled = false;
+            let mut failed = false;
+            for result in results {
+                let status = match result.status {
+                    crate::notifications::runtime::TestDeliveryStatus::Accepted => {
+                        any_enabled = true;
+                        "accepted"
+                    }
+                    crate::notifications::runtime::TestDeliveryStatus::Failed => {
+                        any_enabled = true;
+                        failed = true;
+                        "failed"
+                    }
+                    crate::notifications::runtime::TestDeliveryStatus::TimedOut => {
+                        any_enabled = true;
+                        failed = true;
+                        "timed_out"
+                    }
+                    crate::notifications::runtime::TestDeliveryStatus::NotEnabled => "not_enabled",
+                };
+                println!("transport={} status={status}", result.transport);
+            }
+            Ok(if failed || !any_enabled { 1 } else { 0 })
+        }
         "status" => {
             let snapshot = if loc.cache.exists() {
                 storage::read_cache(&loc.cache)?
@@ -192,7 +277,11 @@ pub fn run(args: Vec<String>) -> Result<i32, String> {
             checks.push(serde_json::json!({"check":"cache","ok":cache.is_ok(),"path":loc.cache,"error":cache.as_ref().err()}));
             for p in config.providers.iter().filter(|p| p.enabled) {
                 let ok = if p.provider == "opencode-go" {
-                    crate::providers::go::credentials(p).is_ok()
+                    if p.go_auth == crate::config::GoAuth::ConsoleOauth {
+                        crate::providers::go_oauth::prerequisite(p)
+                    } else {
+                        crate::providers::go::credentials(p).is_ok()
+                    }
                 } else {
                     find_bin(&p.codex_bin)
                 };

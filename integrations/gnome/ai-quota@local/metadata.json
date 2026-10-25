@@ -1,1 +1,8 @@
-{"uuid":"ai-quota@local","name":"AI Quota Monitor","description":"Unified cached Codex and OpenCode Go quota","shell-version":["48","49","50","51"],"version":1}
+{
+  "uuid": "ai-quota@local",
+  "name": "AI Quota Monitor",
+  "description": "Unified cached Codex and OpenCode Go quota",
+  "shell-version": ["48", "49", "50", "51"],
+  "settings-schema": "org.gnome.shell.extensions.ai-quota",
+  "version": 2
+}

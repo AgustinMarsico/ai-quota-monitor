@@ -20,7 +20,9 @@ scheduler → normalized model → SQLite transaction → atomic JSON
 - `model`: tipos normalizados, validación y obsolescencia.
 - `config`: único JSON tipado; settings desconocidos generan error.
 - `storage`: bloqueos, SQLite, snapshot, historial, CSV e importación.
-- `scheduler`: intervalos por perfil, backoff, señales y notificaciones.
+- `scheduler`: intervalos por perfil, backoff, señales y observaciones de intentos.
+- `notifications::policy`: decisiones deterministas y estado lógico;
+  `notifications::runtime`: entrega desacoplada por Desktop y ntfy.
 - `cli`: argumentos, salida rápida y diagnóstico offline.
 - `integrations/shared/view.mjs`: validación y representación visual común.
 
@@ -75,12 +77,26 @@ Backoff exponencial con jitter acotado; errores de autenticación usan una base
 de al menos diez minutos. `Retry-After`, numérico o fecha HTTP, tiene prioridad
 sobre el máximo normal de backoff. No se hacen reintentos internos ocultos.
 
-Alertas 20/10/5: un aviso por salto al nivel más urgente, con estado durable.
-Los avisos del umbral 5 son críticos; los de 10/20 son normales. La entrega es
-best-effort, acotada a dos segundos por proceso para no bloquear el monitor.
-Reinicios Go estimados admiten una tolerancia de cinco minutos. En ventanas con
-reinicio conocido no se repite un umbral del mismo período. Sin reinicio conocido,
-se rearman únicamente tras observar recuperación, nunca por un día artificial.
+Sin `notification_policy`, alertas legacy 20/10/5 **restante** (80/90/95
+consumido): un aviso por salto al nivel más urgente, con estado durable.
+El aviso del umbral 5 es crítico. La política nueva opt-in permite listas
+ordenadas de umbrales consumidos por proveedor/perfil/ventana y eventos
+`threshold`, `quota_renewed`, `quota_recovered`, `monitor_failed` y
+`monitor_recovered`. La selección de umbrales va de global a proveedor,
+perfil y ventana; los overrides reemplazan la lista completa. La detección y
+deduplicación pertenecen al núcleo y se persisten junto con el snapshot, no
+a los transportes. El estado de salud del monitor cuenta intentos reales,
+no ciclos saltados por backoff; la recuperación de cuota requiere margen y
+confirmaciones sucesivas. Un reinicio de cuota solo se confirma con una
+lectura del proveedor, no por el reloj. Reinicios Go estimados admiten una
+tolerancia de cinco minutos. La entrega por transporte es asíncrona,
+best-effort y en memoria: una publicación fallida no revierte la transacción
+ni afecta al backoff o código de salida de la consulta. Ver
+[`notifications.md`](notifications.md) para la configuración, la migración y
+las limitaciones de entrega.
 
-SQLite no contiene claves ni respuestas remotas completas. Logs del daemon se
-limitan a fallos resumidos una vez por minuto; journalctl aporta el diagnóstico.
+SQLite no contiene claves ni respuestas remotas completas. Los logs normales del
+daemon informan intentos reales y transiciones; los ciclos omitidos por backoff
+solo se registran en modo debug y una vez por plazo de reintento. Los errores
+persistentes de almacenamiento se limitan a una vez cada cinco minutos;
+`journalctl` aporta el diagnóstico.

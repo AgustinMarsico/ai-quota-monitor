@@ -1,5 +1,6 @@
 pub mod codex;
 pub mod go;
+pub mod go_oauth;
 pub const PROVIDER_IDS: &[&str] = &["codex", "opencode-go"];
 use crate::{
     config::ProviderConfig,
